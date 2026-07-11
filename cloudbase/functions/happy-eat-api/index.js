@@ -119,6 +119,34 @@ app.post("/api/drafts/analyze", route(async (req, res) => {
   res.json({ draft: publicRecipe(recipe), app: buildApp(state) });
 }));
 
+app.post("/api/recipes/generate", route(async (req, res) => {
+  const hasSelection = Object.hasOwn(req.body || {}, "ingredientIds");
+  if (hasSelection && !Array.isArray(req.body.ingredientIds)) {
+    throw httpError(422, "\u98df\u6750\u9009\u62e9\u65e0\u6548");
+  }
+  const ingredientIds = [...new Set((req.body?.ingredientIds || []).map(Number))];
+  if (ingredientIds.length > 100 || ingredientIds.some((id) => !Number.isInteger(id) || id <= 0)) {
+    throw httpError(422, "\u98df\u6750\u9009\u62e9\u65e0\u6548");
+  }
+
+  const currentState = await readState();
+  const selected = ingredientIds.length > 0
+    ? currentState.ingredients.filter((item) => ingredientIds.includes(Number(item.id)))
+    : currentState.ingredients;
+  if (selected.length === 0) throw httpError(422, "\u8bf7\u5148\u6dfb\u52a0\u53ef\u7528\u98df\u6750");
+  if (ingredientIds.length > 0 && selected.length !== ingredientIds.length) {
+    throw httpError(422, "\u6240\u9009\u98df\u6750\u5df2\u4e0d\u5b58\u5728\uff0c\u8bf7\u91cd\u65b0\u9009\u62e9");
+  }
+
+  const sourceText = formatAvailableIngredients(selected);
+  const recipe = await createRecipe("generated", sourceText, "", selected);
+  const state = await mutateState((draft) => {
+    recipe.id = nextId(draft.recipes);
+    draft.recipes.push(recipe);
+  });
+  res.json({ draft: publicRecipe(recipe), app: buildApp(state) });
+}));
+
 app.patch("/api/drafts/:id", route(async (req, res) => {
   const state = await updateRecipe(req.params.id, "draft", req.body);
   const draft = state.recipes.find((item) => String(item.id) === req.params.id);
@@ -286,10 +314,20 @@ function parseIngredientText(text) {
     }).filter((item) => item.name);
 }
 
-async function createRecipe(sourceType, sourceText, imageDataUrl) {
-  const extracted = await extractRecipeWithLLM(sourceText, imageDataUrl);
+async function createRecipe(sourceType, sourceText, imageDataUrl, generatedIngredients = []) {
+  const extracted = sourceType === "generated"
+    ? await generateRecipeWithLLM(sourceText)
+    : await extractRecipeWithLLM(sourceText, imageDataUrl);
   const required = sanitizeIngredients(extracted.requiredIngredients, true).map((item) => ({ ...item, required: true }));
-  const optional = sanitizeIngredients(extracted.optionalIngredients, true).map((item) => ({ ...item, required: false }));
+  let optional = sanitizeIngredients(extracted.optionalIngredients, true).map((item) => ({ ...item, required: false }));
+  if (sourceType === "generated") {
+    const available = new Set(generatedIngredients.map((item) => item.name));
+    if (required.length === 0 || required.some((item) => !available.has(item.name))) {
+      throw httpError(502, "AI \u751f\u6210\u4e86\u73b0\u6709\u6e05\u5355\u4e4b\u5916\u7684\u5fc5\u9700\u98df\u6750\uff0c\u8bf7\u91cd\u8bd5");
+    }
+    const allowed = new Set([...available, ...PANTRY]);
+    optional = optional.filter((item) => allowed.has(item.name));
+  }
   const steps = Array.isArray(extracted.steps) && extracted.steps.length
     ? extracted.steps.map((step) => String(step).trim()).filter(Boolean).slice(0, 8)
     : splitSteps(sourceText);
@@ -304,6 +342,36 @@ async function createRecipe(sourceType, sourceText, imageDataUrl) {
     ingredients: [...required, ...optional],
     steps,
   };
+}
+
+function formatAvailableIngredients(ingredients) {
+  const stateLabels = {
+    expiring: "\u5feb\u8fc7\u671f",
+    priority: "\u4f18\u5148\u7528\u6389",
+    frozen: "\u51b7\u51bb",
+  };
+  return ingredients.map((item) => {
+    const state = stateLabels[item.state];
+    return `${item.name}${state ? `\uff08${state}\uff09` : ""}`;
+  }).join("\u3001");
+}
+
+async function generateRecipeWithLLM(sourceText) {
+  const prompt = [
+    "Create one practical Chinese home-style recipe using the available ingredients below.",
+    `Available ingredients: ${sourceText}`,
+    `Pantry seasonings: ${PANTRY.join("\u3001")}`,
+    "Prefer ingredients marked as expiring or priority.",
+    "requiredIngredients must only contain available ingredients. Pantry seasonings belong in optionalIngredients.",
+    "Write the title, ingredient names, and steps in Simplified Chinese.",
+    "Return JSON only with this shape:",
+    "{\"title\":\"...\",\"method\":\"...\",\"minutes\":15,\"preferenceWarning\":\"\",\"requiredIngredients\":[{\"name\":\"...\",\"quantityLabel\":\"...\"}],\"optionalIngredients\":[],\"steps\":[\"...\"]}",
+    "method must be one of \u7092, \u716e, \u84b8, \u714e, \u70e4, \u51c9\u62cc, \u7096, \u5176\u4ed6.",
+  ].join("\n");
+  return callCloudBaseJson({
+    model: process.env.CLOUDBASE_TEXT_MODEL || "deepseek-v4-flash",
+    messages: [{ role: "user", content: prompt }],
+  });
 }
 
 function extractRecipeLocally(text) {

@@ -52,3 +52,14 @@ jobs:
 
       - name: Deploy frontend
         run: tcb hosting deploy ./dist --env-id "$CLOUDBASE_ENV_ID" --json
+
+      - name: Verify recipe generation route
+        env:
+          FAMILY_ACCESS_CODE: ${{ secrets.FAMILY_ACCESS_CODE }}
+        run: |
+          status=$(curl --silent --show-error --output /tmp/generate-response.json --write-out "%{http_code}" \
+            --request POST "$VITE_API_BASE_URL/api/recipes/generate" \
+            --header "Authorization: Bearer $FAMILY_ACCESS_CODE" \
+            --header "Content-Type: application/json" \
+            --data '{"ingredientIds":"invalid"}')
+          test "$status" = "422"
