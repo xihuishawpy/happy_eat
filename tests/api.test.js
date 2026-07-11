@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { api, startTestServer } from "./helpers/server.js";
@@ -175,6 +177,68 @@ test("菜谱导入 creates 草稿 and confirming it makes it a 正式菜谱", as
     assert.equal(savedRecipe.steps.length > 0, true);
   } finally {
     await server.stop();
+  }
+});
+
+test("LLM can generate a recipe draft from available ingredients", async () => {
+  let requestBody;
+  let responseRecipe = {
+    title: "番茄炒蛋",
+    method: "炒",
+    minutes: 15,
+    preferenceWarning: "",
+    requiredIngredients: [
+      { name: "番茄", quantityLabel: "2个" },
+      { name: "鸡蛋", quantityLabel: "2个" },
+    ],
+    optionalIngredients: [{ name: "生抽", quantityLabel: "1勺" }],
+    steps: ["番茄切块，鸡蛋打散。", "鸡蛋炒熟后加入番茄。"],
+  };
+  const llm = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify(responseRecipe),
+          },
+        }],
+      }));
+    });
+  });
+  llm.listen(0, "127.0.0.1");
+  await once(llm, "listening");
+
+  const server = await startTestServer({
+    env: {
+      DASHSCOPE_API_KEY: "test-key",
+      DASHSCOPE_BASE_URL: `http://127.0.0.1:${llm.address().port}`,
+      DASHSCOPE_TEXT_MODEL: "test-model",
+    },
+  });
+
+  try {
+    const generated = await api(server, "/api/recipes/generate", { method: "POST" });
+
+    assert.equal(generated.response.status, 200);
+    assert.equal(generated.payload.draft.title, "番茄炒蛋");
+    assert.equal(generated.payload.draft.sourceType, "generated");
+    assert.equal(generated.payload.draft.status, "draft");
+    assert.equal(generated.payload.draft.ingredients.some((item) => item.name === "番茄"), true);
+    assert.equal(requestBody.model, "test-model");
+    assert.match(requestBody.messages[1].content, /现有食材/);
+
+    responseRecipe = { ...responseRecipe, requiredIngredients: [{ name: "牛肉", quantityLabel: "200克" }] };
+    const hallucinated = await api(server, "/api/recipes/generate", { method: "POST" });
+    assert.equal(hallucinated.response.status, 502);
+    assert.equal((await api(server, "/api/app")).payload.drafts.length, 1);
+  } finally {
+    await server.stop();
+    llm.close();
+    await once(llm, "close");
   }
 });
 

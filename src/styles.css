@@ -1354,11 +1354,18 @@ a:focus-visible {
 
 .draft-action {
   z-index: 4;
+  display: grid;
+  gap: 10px;
 }
 
 .wide-primary {
   min-height: 58px;
   font-size: 18px;
+}
+
+.draft-action .secondary-button {
+  width: 100%;
+  min-height: 50px;
 }
 
 .draft-panel {

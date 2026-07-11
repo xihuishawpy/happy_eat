@@ -286,6 +286,24 @@ export default function App() {
     }
   }
 
+  async function generateRecipe() {
+    setPendingAction("recipe-generate");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const result = await api("/api/recipes/generate", { token, method: "POST" });
+      setApp(result.app);
+      setActiveTab("drafts");
+      setDraftEditor(result.draft);
+      setSyncState("synced");
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
   async function saveFormalRecipe(recipe) {
     setPendingAction("recipe-save");
     setSyncState("syncing");
@@ -530,7 +548,16 @@ export default function App() {
 
         {activeTab === "today" && (
           <section className="draft-action">
-            <button className="wide-primary" type="button" onClick={() => setActiveTab("drafts")}>
+            <button
+              className="wide-primary"
+              type="button"
+              onClick={generateRecipe}
+              disabled={busy || !app.ai.configured || app.ingredients.length === 0}
+            >
+              <Sparkles size={22} />
+              {pendingAction === "recipe-generate" ? "正在生成菜谱" : "AI 生成菜谱"}
+            </button>
+            <button className="secondary-button" type="button" onClick={() => setActiveTab("drafts")} disabled={busy}>
               <Plus size={24} />
               导入菜谱
             </button>

@@ -22,6 +22,7 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
     await page.getByLabel("家庭访问码").fill(server.accessCode);
     await page.getByRole("button", { name: "进入" }).click();
     await page.getByText("家里食材有变化？").waitFor();
+    assert.equal(await page.getByRole("button", { name: "AI 生成菜谱" }).isDisabled(), true);
 
     const todayLayout = await page.evaluate(() => ({
       decisionTop: document.querySelector(".matches-panel").getBoundingClientRect().top,

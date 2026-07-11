@@ -18,6 +18,7 @@ const dashScopeBaseUrl = process.env.DASHSCOPE_BASE_URL || "https://dashscope.al
 const dashScopeTextModel = process.env.DASHSCOPE_TEXT_MODEL || "qwen-plus";
 const dashScopeVisionModel = process.env.DASHSCOPE_VISION_MODEL || "qwen3-vl-plus";
 const llmConfigured = Boolean(dashScopeApiKey);
+const pantry = ["盐", "白糖", "生抽", "老抽", "食用油", "香醋", "料酒"];
 
 fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
@@ -197,6 +198,24 @@ app.post("/api/drafts/analyze", async (req, res) => {
   res.json({ draft, app: readAppState() });
 });
 
+app.post("/api/recipes/generate", async (req, res) => {
+  if (!llmConfigured) {
+    return res.status(503).json({ error: "AI 菜谱生成尚未配置" });
+  }
+
+  const ingredients = db.prepare(`
+    SELECT name, state FROM ingredients
+    ORDER BY CASE state WHEN 'expiring' THEN 0 WHEN 'priority' THEN 1 ELSE 2 END, name
+  `).all();
+  if (ingredients.length === 0) {
+    return res.status(422).json({ error: "请先添加可用食材" });
+  }
+
+  const sourceText = formatAvailableIngredients(ingredients);
+  const draft = await createRecipeDraft("generated", sourceText, "", ingredients);
+  res.json({ draft, app: readAppState() });
+});
+
 app.patch("/api/drafts/:id", (req, res) => updateRecipe(req, res, "draft"));
 
 app.patch("/api/recipes/:id", (req, res) => updateRecipe(req, res, "formal"));
@@ -286,7 +305,7 @@ function updateRecipe(req, res, status) {
 
 app.use("/api", (err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: err.message || "服务端处理失败" });
+  res.status(err.status || 500).json({ error: err.message || "服务端处理失败" });
 });
 
 if (process.env.NODE_ENV === "production") {
@@ -474,12 +493,24 @@ function parseIngredientText(text) {
     .filter((item) => item.name.length > 0);
 }
 
-async function createRecipeDraft(sourceType, sourceText, imageDataUrl = "") {
-  const extracted = llmConfigured
+async function createRecipeDraft(sourceType, sourceText, imageDataUrl = "", generatedIngredients = []) {
+  const extracted = sourceType === "generated"
+    ? await generateRecipeWithLLM(sourceText)
+    : llmConfigured
     ? await extractRecipeWithLLM(sourceType, sourceText, imageDataUrl)
     : extractRecipeLocally(sourceText);
   const required = sanitizeIngredientItems(extracted.requiredIngredients, { includeQuantity: true });
-  const optional = sanitizeIngredientItems(extracted.optionalIngredients, { includeQuantity: true });
+  let optional = sanitizeIngredientItems(extracted.optionalIngredients, { includeQuantity: true });
+  if (sourceType === "generated") {
+    const available = new Set(generatedIngredients.map((item) => item.name));
+    if (required.length === 0 || required.some((item) => !available.has(item.name))) {
+      const error = new Error("AI 生成了现有清单之外的必需食材，请重试");
+      error.status = 502;
+      throw error;
+    }
+    const allowed = new Set([...available, ...pantry]);
+    optional = optional.filter((item) => allowed.has(item.name));
+  }
   const steps = Array.isArray(extracted.steps) && extracted.steps.length > 0
     ? extracted.steps.map((step) => String(step).trim()).filter(Boolean).slice(0, 8)
     : splitSteps(sourceText);
@@ -508,6 +539,34 @@ async function createRecipeDraft(sourceType, sourceText, imageDataUrl = "") {
   });
 
   return readAppState().drafts.find((draft) => draft.id === recipeId);
+}
+
+function formatAvailableIngredients(ingredients) {
+  const stateLabels = { expiring: "快过期", priority: "优先用掉", frozen: "冷冻" };
+  return ingredients.map((item) => `${item.name}${stateLabels[item.state] ? `（${stateLabels[item.state]}）` : ""}`).join("、");
+}
+
+async function generateRecipeWithLLM(sourceText) {
+  const prompt = [
+    "请根据家庭现有食材设计一道实际可做的中式家常菜。",
+    `现有食材：${sourceText}`,
+    "常备调料：盐、白糖、生抽、老抽、食用油、香醋、料酒。",
+    "优先使用标记为快过期或优先用掉的食材。",
+    "requiredIngredients 只能使用现有食材；常备调料放入 optionalIngredients。",
+    "不要把家里没有的食材列为必需食材。步骤要具体、简短并适合家庭烹饪。",
+    "返回且只返回 JSON，不要 Markdown。",
+    "JSON 结构：",
+    "{\"title\":\"番茄炒蛋\",\"method\":\"炒\",\"minutes\":15,\"preferenceWarning\":\"\",\"requiredIngredients\":[{\"name\":\"番茄\",\"quantityLabel\":\"2个\"}],\"optionalIngredients\":[{\"name\":\"生抽\",\"quantityLabel\":\"1勺\"}],\"steps\":[\"番茄切块。\"]}",
+    "method 只能是：炒、煮、蒸、煎、烤、凉拌、炖、其他。",
+  ].join("\n");
+
+  return callDashScopeJson({
+    model: dashScopeTextModel,
+    messages: [
+      { role: "system", content: "你是家庭厨师，擅长利用现有食材生成简单可靠的中文菜谱。" },
+      { role: "user", content: prompt },
+    ],
+  });
 }
 
 function extractRecipeLocally(sourceText) {

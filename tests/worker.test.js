@@ -110,7 +110,45 @@ test("Cloudflare Worker enforces public request boundaries", async () => {
       body: { sourceType: "web", content: "http://127.0.0.1/recipe" },
     });
     assert.equal(privateWebPage.status, 422);
+
+    const unavailableGeneration = await callWorker(env, "/api/recipes/generate", { method: "POST" });
+    assert.equal(unavailableGeneration.status, 503);
   } finally {
+    database.close();
+  }
+});
+
+test("Cloudflare Worker generates a draft from D1 ingredients", async () => {
+  const database = createDatabase();
+  const env = { ...createEnv(database), DASHSCOPE_API_KEY: "test-key", DASHSCOPE_TEXT_MODEL: "test-model" };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    choices: [{
+      message: {
+        content: JSON.stringify({
+          title: "番茄炒蛋",
+          method: "炒",
+          minutes: 15,
+          preferenceWarning: "",
+          requiredIngredients: [
+            { name: "番茄", quantityLabel: "2个" },
+            { name: "鸡蛋", quantityLabel: "2个" },
+          ],
+          optionalIngredients: [{ name: "生抽", quantityLabel: "1勺" }],
+          steps: ["番茄切块，鸡蛋打散。", "鸡蛋炒熟后加入番茄。"],
+        }),
+      },
+    }],
+  });
+
+  try {
+    const generated = await callWorker(env, "/api/recipes/generate", { method: "POST" });
+    assert.equal(generated.status, 200);
+    assert.equal(generated.payload.draft.title, "番茄炒蛋");
+    assert.equal(generated.payload.draft.sourceType, "generated");
+    assert.equal(generated.payload.app.drafts.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
     database.close();
   }
 });

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-export async function startTestServer() {
+export async function startTestServer({ env = {} } = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "happy-eat-test-"));
   const databasePath = path.join(tmpDir, "happy-eat.sqlite");
   const accessCode = "test-family";
@@ -13,10 +13,11 @@ export async function startTestServer() {
     cwd: path.resolve(import.meta.dirname, "../.."),
     env: {
       ...process.env,
+      ...env,
       PORT: String(port),
       DATABASE_PATH: databasePath,
       FAMILY_ACCESS_CODE: accessCode,
-      DASHSCOPE_API_KEY: "",
+      DASHSCOPE_API_KEY: env.DASHSCOPE_API_KEY ?? "",
       NODE_ENV: "test",
     },
     stdio: ["ignore", "pipe", "pipe"],
