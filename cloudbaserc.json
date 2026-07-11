@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.cloudbase.net/cli/cloudbaserc.schema.json",
+  "version": "2.0",
+  "envId": "shaw-d2gpfh5e6ce1c4c87",
+  "functionRoot": "./cloudbase/functions",
+  "functions": [
+    {
+      "name": "happy-eat-api",
+      "type": "HTTP",
+      "runtime": "Nodejs20.19",
+      "timeout": 60,
+      "memorySize": 256,
+      "installDependency": true,
+      "envVariables": {
+        "CLOUDBASE_ENV_ID": "shaw-d2gpfh5e6ce1c4c87",
+        "FAMILY_ACCESS_CODE": "{{env.FAMILY_ACCESS_CODE}}",
+        "CLOUDBASE_TEXT_MODEL": "deepseek-v4-flash",
+        "CLOUDBASE_VISION_MODEL": "qwen3.5-plus"
+      }
+    }
+  ]
+}

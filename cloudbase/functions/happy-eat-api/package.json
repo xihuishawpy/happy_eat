@@ -1,0 +1,15 @@
+{
+  "name": "happy-eat-cloudbase-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.18.0",
+    "express": "^5.2.1",
+    "ws": "^8.21.0"
+  }
+}

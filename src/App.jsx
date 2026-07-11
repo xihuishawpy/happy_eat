@@ -1551,11 +1551,12 @@ function findRecipeById(matches, recipeId) {
 }
 
 async function api(url, options = {}) {
+  const apiUrl = `${import.meta.env.VITE_API_BASE_URL || ""}${url}`;
   const headers = {
     "Content-Type": "application/json",
     ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
   };
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl, {
     method: options.method || "GET",
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
