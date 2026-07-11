@@ -266,8 +266,7 @@ a:focus-visible {
 
 .ingredient-panel,
 .matches-panel,
-.draft-panel,
-.prefs-panel {
+.draft-panel {
   padding: 14px;
 }
 
@@ -1505,31 +1504,6 @@ a:focus-visible {
   font-size: 14px;
 }
 
-.prefs-panel {
-  margin-top: 10px;
-}
-
-.preference-list {
-  display: grid;
-  gap: 10px;
-}
-
-.toggle-row {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0 12px;
-}
-
-.toggle-row input {
-  width: 22px;
-  height: 22px;
-  accent-color: var(--green);
-}
-
 .notice {
   display: flex;
   align-items: center;
@@ -1561,7 +1535,7 @@ a:focus-visible {
   bottom: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid var(--line);
   background: #fff;
   padding: 8px max(8px, env(safe-area-inset-left)) calc(7px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-right));
@@ -1688,8 +1662,7 @@ a:focus-visible {
 
   .ingredient-panel,
   .matches-panel,
-  .draft-panel,
-  .prefs-panel {
+  .draft-panel {
     padding: 12px;
   }
 
@@ -1772,8 +1745,7 @@ a:focus-visible {
   }
 
   .draft-action,
-  .draft-panel,
-  .prefs-panel {
+  .draft-panel {
     grid-column: 2;
   }
 

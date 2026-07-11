@@ -4,7 +4,6 @@ import {
   ChefHat,
   Check,
   ChevronLeft,
-  CircleHelp,
   ClipboardList,
   Clock3,
   FileText,
@@ -15,7 +14,6 @@ import {
   RefreshCcw,
   Save,
   Search,
-  Settings,
   Sparkles,
   Trash2,
   Users,
@@ -29,7 +27,6 @@ const tabs = [
   { id: "ingredients", label: "食材", icon: ClipboardList },
   { id: "recipes", label: "菜谱", icon: BookOpen },
   { id: "drafts", label: "草稿", icon: FileText },
-  { id: "prefs", label: "偏好", icon: Settings },
 ];
 
 const ingredientCategories = ["蔬菜", "肉禽蛋", "主食", "调味", "乳品", "其他"];
@@ -600,25 +597,6 @@ export default function App() {
           </section>
         )}
 
-        {activeTab === "prefs" && (
-          <section className="panel prefs-panel">
-            <div className="section-title">
-              <div>
-                <h1>偏好设置</h1>
-                <p>用于排序和忌口提示，不作为医疗级过滤</p>
-              </div>
-              <CircleHelp size={19} />
-            </div>
-            <div className="preference-list">
-              {["少辣", "少油", "孩子能吃", "不吃香菜"].map((item) => (
-                <label key={item} className="toggle-row">
-                  <span>{item}</span>
-                  <input type="checkbox" defaultChecked={item !== "不吃香菜"} />
-                </label>
-              ))}
-            </div>
-          </section>
-        )}
       </main>
 
       <nav className="bottom-nav" aria-label="主导航">

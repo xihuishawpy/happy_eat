@@ -147,8 +147,6 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
     assert.equal(await page.getByText("测试正式菜谱").count(), 0);
 
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-    await page.getByRole("button", { name: "偏好", exact: true }).click();
-    await page.getByRole("heading", { name: "偏好设置" }).waitFor();
     await page.getByRole("button", { name: "食材", exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
     assert.deepEqual(consoleErrors, []);
