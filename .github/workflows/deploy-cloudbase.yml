@@ -1,0 +1,52 @@
+name: Deploy to CloudBase
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: cloudbase-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDBASE_ENV_ID: shaw-d2gpfh5e6ce1c4c87
+      VITE_API_BASE_URL: https://shaw-d2gpfh5e6ce1c4c87.service.tcloudbase.com
+      CLOUDBASE_API_KEY: ${{ secrets.CLOUDBASE_API_KEY }}
+      FAMILY_ACCESS_CODE: ${{ secrets.FAMILY_ACCESS_CODE }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Install CloudBase CLI
+        run: npm install --global @cloudbase/cli@3.6.1
+
+      - name: Authenticate with CloudBase
+        run: tcb login --cloudbase-api-key "$CLOUDBASE_API_KEY" --env-id "$CLOUDBASE_ENV_ID" --json
+
+      - name: Deploy API function
+        run: tcb fn deploy happy-eat-api --force --httpFn --deployMode cos --json
+
+      - name: Deploy frontend
+        run: tcb hosting deploy ./dist --env-id "$CLOUDBASE_ENV_ID" --json
