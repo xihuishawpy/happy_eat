@@ -96,17 +96,36 @@ app.get("/api/app", (req, res) => {
   res.json(readAppState());
 });
 
+app.post("/api/ingredients", (req, res) => {
+  const name = normalizeIngredientName(String(req.body?.name || ""));
+
+  if (!name) {
+    return res.status(422).json({ error: "请输入食材名称" });
+  }
+
+  if (db.prepare("SELECT id FROM ingredients WHERE name = ?").get(name)) {
+    return res.status(409).json({ error: "这个食材已经在清单里" });
+  }
+
+  const categoryInput = String(req.body?.category || "").trim();
+  const category = categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name);
+  const state = normalizeState(req.body?.state);
+
+  db.prepare(`
+    INSERT INTO ingredients (name, category, state)
+    VALUES (?, ?, ?)
+  `).run(name, category, state);
+
+  res.json(readAppState());
+});
+
 app.post("/api/ingredients/batch", async (req, res) => {
   const parsed = await parseIngredientInput(req.body?.text || "");
   const insert = db.prepare(`
-    INSERT INTO ingredients (name, category, quantity_label, state)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO ingredients (name, category, state)
+    VALUES (?, ?, ?)
     ON CONFLICT(name) DO UPDATE SET
       category = excluded.category,
-      quantity_label = CASE
-        WHEN excluded.quantity_label = '' THEN ingredients.quantity_label
-        ELSE excluded.quantity_label
-      END,
       state = CASE
         WHEN excluded.state = 'none' THEN ingredients.state
         ELSE excluded.state
@@ -115,7 +134,7 @@ app.post("/api/ingredients/batch", async (req, res) => {
 
   runInTransaction(() => {
     for (const item of parsed) {
-      insert.run(item.name, item.category, item.quantityLabel, item.state);
+      insert.run(item.name, item.category, item.state);
     }
   });
   res.json(readAppState());
@@ -128,16 +147,25 @@ app.patch("/api/ingredients/:id", (req, res) => {
     return res.status(404).json({ error: "食材不存在" });
   }
 
-  const name = normalizeIngredientName(req.body?.name ?? ingredient.name);
-  const category = req.body?.category ?? ingredient.category;
-  const quantityLabel = req.body?.quantityLabel ?? ingredient.quantity_label;
-  const state = req.body?.state ?? ingredient.state;
+  const name = normalizeIngredientName(String(req.body?.name ?? ingredient.name));
+
+  if (!name) {
+    return res.status(422).json({ error: "请输入食材名称" });
+  }
+
+  if (db.prepare("SELECT id FROM ingredients WHERE name = ? AND id != ?").get(name, req.params.id)) {
+    return res.status(409).json({ error: "这个食材已经在清单里" });
+  }
+
+  const categoryInput = String(req.body?.category ?? ingredient.category).trim();
+  const category = categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name);
+  const state = normalizeState(req.body?.state ?? ingredient.state);
 
   db.prepare(`
     UPDATE ingredients
-    SET name = ?, category = ?, quantity_label = ?, state = ?
+    SET name = ?, category = ?, state = ?
     WHERE id = ?
-  `).run(name, category, quantityLabel, state, req.params.id);
+  `).run(name, category, state, req.params.id);
 
   res.json(readAppState());
 });
@@ -152,6 +180,10 @@ app.post("/api/drafts/analyze", async (req, res) => {
   let sourceText = req.body?.content || "";
   const imageDataUrl = req.body?.imageDataUrl || "";
 
+  if (sourceType !== "image" && !String(sourceText).trim()) {
+    return res.status(422).json({ error: "请先提供菜谱内容" });
+  }
+
   if (sourceType === "web") {
     sourceText = await readWebPageText(sourceText);
   }
@@ -162,6 +194,59 @@ app.post("/api/drafts/analyze", async (req, res) => {
 
   const draft = await createRecipeDraft(sourceType, sourceText, imageDataUrl);
   res.json({ draft, app: readAppState() });
+});
+
+app.patch("/api/drafts/:id", (req, res) => {
+  const draft = db.prepare("SELECT id FROM recipes WHERE id = ? AND status = 'draft'").get(req.params.id);
+
+  if (!draft) {
+    return res.status(404).json({ error: "菜谱草稿不存在" });
+  }
+
+  const title = String(req.body?.title || "").trim().slice(0, 40);
+  const rawIngredients = Array.isArray(req.body?.ingredients) ? req.body.ingredients : [];
+  const ingredients = rawIngredients
+    .map((item) => {
+        const sanitized = sanitizeIngredientItems([item], { includeQuantity: true })[0];
+        return sanitized ? { ...sanitized, required: Boolean(item.required) } : null;
+      })
+    .filter(Boolean);
+  const rawSteps = Array.isArray(req.body?.steps) ? req.body.steps.slice(0, 12) : [];
+  const steps = rawSteps.map((step) => String(step).trim()).filter(Boolean);
+
+  if (
+    !title
+    || ingredients.length === 0
+    || ingredients.length !== rawIngredients.length
+    || steps.length === 0
+    || steps.length !== rawSteps.length
+  ) {
+    return res.status(422).json({ error: "请填写标题、食材和烹饪步骤" });
+  }
+
+  const insertIngredient = db.prepare("INSERT INTO recipe_ingredients (recipe_id, name, quantity_label, required) VALUES (?, ?, ?, ?)");
+  const insertStep = db.prepare("INSERT INTO recipe_steps (recipe_id, position, text) VALUES (?, ?, ?)");
+
+  runInTransaction(() => {
+    db.prepare(`
+      UPDATE recipes
+      SET title = ?, method = ?, minutes = ?, preference_warning = ?
+      WHERE id = ? AND status = 'draft'
+    `).run(
+      title,
+      normalizeMethod(req.body?.method),
+      clampMinutes(req.body?.minutes),
+      String(req.body?.preferenceWarning || "").trim().slice(0, 30),
+      req.params.id,
+    );
+    db.prepare("DELETE FROM recipe_ingredients WHERE recipe_id = ?").run(req.params.id);
+    db.prepare("DELETE FROM recipe_steps WHERE recipe_id = ?").run(req.params.id);
+    ingredients.forEach((item) => insertIngredient.run(req.params.id, item.name, item.quantityLabel, item.required ? 1 : 0));
+    steps.forEach((step, index) => insertStep.run(req.params.id, index + 1, step));
+  });
+
+  const appState = readAppState();
+  res.json({ draft: appState.drafts.find((item) => item.id === draft.id), app: appState });
 });
 
 app.post("/api/drafts/:id/confirm", (req, res) => {
@@ -204,7 +289,7 @@ app.listen(port, () => {
 });
 
 function readAppState() {
-  const ingredients = db.prepare("SELECT id, name, category, quantity_label AS quantityLabel, state FROM ingredients ORDER BY category, name").all();
+  const ingredients = db.prepare("SELECT id, name, category, state FROM ingredients ORDER BY category, name").all();
   const recipes = db.prepare("SELECT * FROM recipes ORDER BY id DESC").all();
   const recipeIds = recipes.map((recipe) => recipe.id);
   const ingredientsByRecipe = new Map();
@@ -326,12 +411,12 @@ async function parseIngredientInput(text) {
           "你是家庭厨房食材录入助手。",
           "从用户的自然语言中提取可用食材清单。",
           "返回且只返回 JSON，不要 Markdown。",
-          "JSON 结构：{\"ingredients\":[{\"name\":\"番茄\",\"quantityLabel\":\"2个\",\"category\":\"蔬菜\",\"state\":\"none\"}]}。",
+          "JSON 结构：{\"ingredients\":[{\"name\":\"番茄\",\"category\":\"蔬菜\",\"state\":\"none\"}]}。",
           "category 只能是：蔬菜、肉禽蛋、主食、调味、乳品、其他。",
           "state 只能是：priority、expiring、frozen、none。",
           "看到优先用掉、剩、今天用，state=priority；看到快过期、快坏，state=expiring；看到冷冻、冻，state=frozen。",
           "把同义食材归一为常见名称，例如西红柿归一为番茄，马铃薯归一为土豆，酱油按语境归一为生抽。",
-          "quantityLabel 只放用户明确说出的数量和单位，没有则为空字符串。",
+          "数量和单位只用于识别食材名称，不要返回数量字段。",
         ].join("\n"),
       },
       {
@@ -371,8 +456,8 @@ async function createRecipeDraft(sourceType, sourceText, imageDataUrl = "") {
   const extracted = llmConfigured
     ? await extractRecipeWithLLM(sourceType, sourceText, imageDataUrl)
     : extractRecipeLocally(sourceText);
-  const required = sanitizeIngredientItems(extracted.requiredIngredients);
-  const optional = sanitizeIngredientItems(extracted.optionalIngredients);
+  const required = sanitizeIngredientItems(extracted.requiredIngredients, { includeQuantity: true });
+  const optional = sanitizeIngredientItems(extracted.optionalIngredients, { includeQuantity: true });
   const steps = Array.isArray(extracted.steps) && extracted.steps.length > 0
     ? extracted.steps.map((step) => String(step).trim()).filter(Boolean).slice(0, 8)
     : splitSteps(sourceText);
@@ -412,12 +497,15 @@ function extractRecipeLocally(sourceText) {
     "食用油", "虾",
   ].filter((name) => sourceText.includes(name));
   const ingredients = detectedNames.length > 0
-    ? detectedNames.map((name) => ({
-        name,
-        category: classifyIngredient(name),
-        quantityLabel: "",
-        state: "none",
-      }))
+    ? detectedNames.map((name) => {
+        const quantityLabel = sourceText.match(new RegExp(`${name}\\s*([一二三四五六七八九十半\\d.]+\\s*(?:个|颗|根|块|片|包|袋|盒|瓶|碗|斤|克|g|kg|勺|把))`, "i"))?.[1] || "";
+        return {
+          name,
+          category: classifyIngredient(name),
+          quantityLabel,
+          state: "none",
+        };
+      })
     : parseIngredientText(sourceText);
   const required = ingredients.slice(0, Math.max(2, Math.min(4, ingredients.length)));
 
@@ -529,7 +617,7 @@ async function readWebPageText(url) {
   }
 }
 
-function sanitizeIngredientItems(items) {
+function sanitizeIngredientItems(items, { includeQuantity = false } = {}) {
   if (!Array.isArray(items)) {
     return [];
   }
@@ -539,12 +627,17 @@ function sanitizeIngredientItems(items) {
       const name = normalizeIngredientName(String(item?.name || ""));
       if (!name) return null;
 
-      return {
+      const ingredient = {
         name,
         category: normalizeCategory(item?.category || classifyIngredient(name)),
-        quantityLabel: String(item?.quantityLabel || item?.quantity || "").trim().slice(0, 20),
         state: normalizeState(item?.state),
       };
+
+      if (includeQuantity) {
+        ingredient.quantityLabel = String(item?.quantityLabel || item?.quantity || "").trim().slice(0, 20);
+      }
+
+      return ingredient;
     })
     .filter(Boolean)
     .slice(0, 60);
