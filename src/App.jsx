@@ -69,6 +69,7 @@ export default function App() {
   const [cookingRecipe, setCookingRecipe] = useState(null);
   const [ingredientEditor, setIngredientEditor] = useState(null);
   const [draftEditor, setDraftEditor] = useState(null);
+  const [recipeEditor, setRecipeEditor] = useState(null);
   const [pendingAction, setPendingAction] = useState("");
   const [error, setError] = useState("");
   const [syncState, setSyncState] = useState("synced");
@@ -279,6 +280,46 @@ export default function App() {
         setMatchTab(savedRecipe.missing.length > 0 ? "missing" : "ready");
         setSelectedRecipe(savedRecipe);
       }
+      setSyncState("synced");
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function saveFormalRecipe(recipe) {
+    setPendingAction("recipe-save");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const result = await api(`/api/recipes/${recipe.id}`, {
+        token,
+        method: "PATCH",
+        body: recipe,
+      });
+      setApp(result.app);
+      setRecipeEditor(null);
+      setSelectedRecipe(result.recipe);
+      setSyncState("synced");
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function removeFormalRecipe(id) {
+    setPendingAction("recipe-delete");
+    setSyncState("syncing");
+    setError("");
+    try {
+      setApp(await api(`/api/recipes/${id}`, { token, method: "DELETE" }));
+      sessionStorage.removeItem(`happy-eat-cooking-${id}`);
+      setSelectedRecipe(null);
+      setRecipeEditor(null);
       setSyncState("synced");
     } catch (err) {
       setError(err.message);
@@ -606,7 +647,19 @@ export default function App() {
       {selectedRecipe && (
         <RecipeDetailSheet
           recipe={selectedRecipe}
-          onClose={() => setSelectedRecipe(null)}
+          busy={busy}
+          deleting={pendingAction === "recipe-delete"}
+          error={error}
+          onEdit={() => {
+            setRecipeEditor(selectedRecipe);
+            setSelectedRecipe(null);
+            setError("");
+          }}
+          onDelete={removeFormalRecipe}
+          onClose={() => {
+            setSelectedRecipe(null);
+            setError("");
+          }}
           onStartCooking={() => {
             setCookingRecipe(selectedRecipe);
             setSelectedRecipe(null);
@@ -633,9 +686,9 @@ export default function App() {
       )}
 
       {draftEditor && (
-        <DraftEditorSheet
+        <RecipeEditorSheet
           key={draftEditor.id}
-          draft={draftEditor}
+          recipe={draftEditor}
           busy={busy}
           error={error}
           onSave={saveDraft}
@@ -645,12 +698,26 @@ export default function App() {
           }}
         />
       )}
+
+      {recipeEditor && (
+        <RecipeEditorSheet
+          key={recipeEditor.id}
+          recipe={recipeEditor}
+          busy={busy}
+          error={error}
+          onSave={saveFormalRecipe}
+          onClose={() => {
+            setRecipeEditor(null);
+            setError("");
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function AccessGate({ onUnlock }) {
-  const [accessCode, setAccessCode] = useState("happy-eat");
+  const [accessCode, setAccessCode] = useState(import.meta.env.DEV ? "happy-eat" : "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -912,19 +979,20 @@ function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDe
   );
 }
 
-function DraftEditorSheet({ draft, busy, error, onSave, onClose }) {
+function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
+  const isDraft = recipe.status === "draft";
   const [form, setForm] = useState({
-    id: draft.id,
-    title: draft.title,
-    method: draft.method,
-    minutes: draft.minutes,
-    preferenceWarning: draft.preferenceWarning || "",
-    ingredients: draft.ingredients.map((item) => ({
+    id: recipe.id,
+    title: recipe.title,
+    method: recipe.method,
+    minutes: recipe.minutes,
+    preferenceWarning: recipe.preferenceWarning || "",
+    ingredients: recipe.ingredients.map((item) => ({
       name: item.name,
       quantityLabel: item.quantityLabel || "",
       required: Boolean(item.required),
     })),
-    steps: draft.steps.map((step) => step.text),
+    steps: recipe.steps.map((step) => step.text),
   });
 
   useEffect(() => {
@@ -994,17 +1062,17 @@ function DraftEditorSheet({ draft, busy, error, onSave, onClose }) {
         <div className="sheet-handle" aria-hidden="true" />
         <header className="sheet-header">
           <div>
-            <h2 id="draft-editor-title">检查菜谱草稿</h2>
-            <p>确认标题、食材和步骤后再保存到菜谱库。</p>
+            <h2 id="draft-editor-title">{isDraft ? "检查菜谱草稿" : "编辑菜谱"}</h2>
+            <p>{isDraft ? "确认标题、食材和步骤后再保存到菜谱库。" : "修改后会立即更新菜谱匹配。"}</p>
           </div>
-          <button className="close-button" type="button" onClick={onClose} disabled={busy} aria-label="关闭草稿编辑">
+          <button className="close-button" type="button" onClick={onClose} disabled={busy} aria-label={isDraft ? "关闭草稿编辑" : "关闭菜谱编辑"}>
             <X size={23} />
           </button>
         </header>
 
         <form className="draft-editor-form" onSubmit={(event) => {
           event.preventDefault();
-          onSave(payload(), event.nativeEvent.submitter?.value === "confirm");
+          onSave(payload(), isDraft && event.nativeEvent.submitter?.value === "confirm");
         }}>
           <label className="form-field">
             <span>菜谱标题</span>
@@ -1076,14 +1144,23 @@ function DraftEditorSheet({ draft, busy, error, onSave, onClose }) {
           {error && <div className="form-error" role="alert">{error}</div>}
 
           <div className="draft-editor-actions">
-            <button className="secondary-button" type="submit" value="save" disabled={busy}>
-              <Save size={18} />
-              {busy ? "正在保存" : "保存草稿"}
-            </button>
-            <button className="primary-button" type="submit" value="confirm" disabled={busy}>
-              <Check size={18} />
-              {busy ? "正在保存" : "确认并保存"}
-            </button>
+            {isDraft ? (
+              <>
+                <button className="secondary-button" type="submit" value="save" disabled={busy}>
+                  <Save size={18} />
+                  {busy ? "正在保存" : "保存草稿"}
+                </button>
+                <button className="primary-button" type="submit" value="confirm" disabled={busy}>
+                  <Check size={18} />
+                  {busy ? "正在保存" : "确认并保存"}
+                </button>
+              </>
+            ) : (
+              <button className="primary-button full" type="submit" disabled={busy}>
+                <Save size={18} />
+                {busy ? "正在保存" : "保存修改"}
+              </button>
+            )}
           </div>
         </form>
       </section>
@@ -1166,12 +1243,13 @@ function CookingMode({ recipe, onClose }) {
   );
 }
 
-function RecipeDetailSheet({ recipe, onClose, onStartCooking }) {
+function RecipeDetailSheet({ recipe, busy, deleting, error, onEdit, onDelete, onClose, onStartCooking }) {
   const required = recipe.ingredients.filter((item) => item.required);
   const optional = recipe.ingredients.filter((item) => !item.required);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
-    <div className="sheet-backdrop" role="presentation" onClick={onClose}>
+    <div className="sheet-backdrop" role="presentation" onClick={() => !busy && onClose()}>
       <section
         className="recipe-sheet"
         role="dialog"
@@ -1188,7 +1266,7 @@ function RecipeDetailSheet({ recipe, onClose, onStartCooking }) {
               <span><ChefHat size={15} />{recipe.method}</span>
             </div>
           </div>
-          <button className="close-button" type="button" onClick={onClose} aria-label="关闭菜谱详情">
+          <button className="close-button" type="button" onClick={onClose} disabled={busy} aria-label="关闭菜谱详情">
             <X size={23} />
           </button>
         </header>
@@ -1232,10 +1310,35 @@ function RecipeDetailSheet({ recipe, onClose, onStartCooking }) {
             ))}
           </ol>
         </div>
-        <button className="primary-button full start-cooking" type="button" onClick={onStartCooking}>
-          <Play size={18} />
-          开始烹饪
-        </button>
+
+        {error && <div className="form-error recipe-detail-error" role="alert">{error}</div>}
+
+        {confirmDelete ? (
+          <div className="delete-confirmation recipe-delete-confirmation">
+            <p>确认删除“{recipe.title}”？删除后无法恢复。</p>
+            <div>
+              <button className="secondary-button" type="button" onClick={() => setConfirmDelete(false)} disabled={busy}>取消</button>
+              <button className="danger-button solid" type="button" onClick={() => onDelete(recipe.id)} disabled={busy}>
+                {deleting ? "正在删除" : "确认删除"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="recipe-detail-actions">
+            <button className="secondary-button" type="button" onClick={onEdit} disabled={busy}>
+              <Pencil size={18} />
+              编辑菜谱
+            </button>
+            <button className="danger-button" type="button" onClick={() => setConfirmDelete(true)} disabled={busy}>
+              <Trash2 size={18} />
+              删除菜谱
+            </button>
+            <button className="primary-button" type="button" onClick={onStartCooking} disabled={busy}>
+              <Play size={18} />
+              开始烹饪
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

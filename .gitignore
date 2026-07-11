@@ -3,4 +3,6 @@ dist/
 data/*.sqlite
 data/*.sqlite-*
 .env
+.dev.vars
+.wrangler/
 .DS_Store

@@ -1017,8 +1017,24 @@ a:focus-visible {
   padding: 12px 0 calc(18px + env(safe-area-inset-bottom));
 }
 
-.start-cooking {
+.draft-editor-actions > .primary-button:only-child {
+  grid-column: 1 / -1;
+}
+
+.recipe-detail-error,
+.recipe-delete-confirmation {
+  margin-top: 16px;
+}
+
+.recipe-detail-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
   margin-top: 20px;
+}
+
+.recipe-detail-actions .primary-button {
+  grid-column: 1 / -1;
 }
 
 .cooking-mode {

@@ -132,8 +132,21 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
     await detail.getByText("测试编辑菜谱").waitFor();
     await detail.getByText("番茄 × 2个").waitFor();
     await detail.getByText("烹饪步骤").waitFor();
+    await detail.getByRole("button", { name: "编辑菜谱" }).click();
+
+    const formalEditor = page.getByRole("dialog", { name: "编辑菜谱" });
+    await formalEditor.getByLabel("菜谱标题").fill("测试正式菜谱");
+    await formalEditor.getByRole("button", { name: "保存修改" }).click();
+
+    const updatedDetail = page.getByRole("dialog", { name: "测试正式菜谱" });
+    await updatedDetail.getByRole("button", { name: "删除菜谱" }).click();
+    await updatedDetail.getByRole("button", { name: "取消" }).click();
+    await updatedDetail.getByRole("button", { name: "删除菜谱" }).click();
+    await updatedDetail.getByRole("button", { name: "确认删除" }).click();
+    await updatedDetail.waitFor({ state: "detached" });
+    assert.equal(await page.getByText("测试正式菜谱").count(), 0);
+
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-    await page.getByRole("button", { name: "关闭菜谱详情" }).click();
     await page.getByRole("button", { name: "偏好", exact: true }).click();
     await page.getByRole("heading", { name: "偏好设置" }).waitFor();
     await page.getByRole("button", { name: "食材", exact: true }).click();

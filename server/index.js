@@ -22,6 +22,7 @@ const llmConfigured = Boolean(dashScopeApiKey);
 fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
 const db = new DatabaseSync(databasePath);
+db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA journal_mode = WAL");
 
 db.exec(`
@@ -196,20 +197,47 @@ app.post("/api/drafts/analyze", async (req, res) => {
   res.json({ draft, app: readAppState() });
 });
 
-app.patch("/api/drafts/:id", (req, res) => {
-  const draft = db.prepare("SELECT id FROM recipes WHERE id = ? AND status = 'draft'").get(req.params.id);
+app.patch("/api/drafts/:id", (req, res) => updateRecipe(req, res, "draft"));
 
-  if (!draft) {
-    return res.status(404).json({ error: "菜谱草稿不存在" });
+app.patch("/api/recipes/:id", (req, res) => updateRecipe(req, res, "formal"));
+
+app.post("/api/drafts/:id/confirm", (req, res) => {
+  const result = db.prepare("UPDATE recipes SET status = 'formal' WHERE id = ? AND status = 'draft'").run(req.params.id);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: "菜谱草稿不存在或已经保存" });
+  }
+
+  res.json({
+    savedRecipeId: Number(req.params.id),
+    app: readAppState(),
+  });
+});
+
+app.delete("/api/recipes/:id", (req, res) => {
+  const result = db.prepare("DELETE FROM recipes WHERE id = ? AND status = 'formal'").run(req.params.id);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: "正式菜谱不存在" });
+  }
+
+  res.json(readAppState());
+});
+
+function updateRecipe(req, res, status) {
+  const recipe = db.prepare("SELECT id FROM recipes WHERE id = ? AND status = ?").get(req.params.id, status);
+
+  if (!recipe) {
+    return res.status(404).json({ error: status === "draft" ? "菜谱草稿不存在" : "正式菜谱不存在" });
   }
 
   const title = String(req.body?.title || "").trim().slice(0, 40);
   const rawIngredients = Array.isArray(req.body?.ingredients) ? req.body.ingredients : [];
   const ingredients = rawIngredients
     .map((item) => {
-        const sanitized = sanitizeIngredientItems([item], { includeQuantity: true })[0];
-        return sanitized ? { ...sanitized, required: Boolean(item.required) } : null;
-      })
+      const sanitized = sanitizeIngredientItems([item], { includeQuantity: true })[0];
+      return sanitized ? { ...sanitized, required: Boolean(item.required) } : null;
+    })
     .filter(Boolean);
   const rawSteps = Array.isArray(req.body?.steps) ? req.body.steps.slice(0, 12) : [];
   const steps = rawSteps.map((step) => String(step).trim()).filter(Boolean);
@@ -231,13 +259,14 @@ app.patch("/api/drafts/:id", (req, res) => {
     db.prepare(`
       UPDATE recipes
       SET title = ?, method = ?, minutes = ?, preference_warning = ?
-      WHERE id = ? AND status = 'draft'
+      WHERE id = ? AND status = ?
     `).run(
       title,
       normalizeMethod(req.body?.method),
       clampMinutes(req.body?.minutes),
       String(req.body?.preferenceWarning || "").trim().slice(0, 30),
       req.params.id,
+      status,
     );
     db.prepare("DELETE FROM recipe_ingredients WHERE recipe_id = ?").run(req.params.id);
     db.prepare("DELETE FROM recipe_steps WHERE recipe_id = ?").run(req.params.id);
@@ -246,21 +275,14 @@ app.patch("/api/drafts/:id", (req, res) => {
   });
 
   const appState = readAppState();
-  res.json({ draft: appState.drafts.find((item) => item.id === draft.id), app: appState });
-});
-
-app.post("/api/drafts/:id/confirm", (req, res) => {
-  const result = db.prepare("UPDATE recipes SET status = 'formal' WHERE id = ? AND status = 'draft'").run(req.params.id);
-
-  if (result.changes === 0) {
-    return res.status(404).json({ error: "菜谱草稿不存在或已经保存" });
+  if (status === "draft") {
+    return res.json({ draft: appState.drafts.find((item) => item.id === recipe.id), app: appState });
   }
 
-  res.json({
-    savedRecipeId: Number(req.params.id),
-    app: readAppState(),
-  });
-});
+  const savedRecipe = [...appState.matches.ready, ...appState.matches.missing]
+    .find((item) => item.id === recipe.id);
+  return res.json({ recipe: savedRecipe, app: appState });
+}
 
 app.use("/api", (err, req, res, next) => {
   console.error(err);

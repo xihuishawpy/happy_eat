@@ -39,6 +39,7 @@ export async function startTestServer() {
   return {
     accessCode,
     baseUrl: `http://localhost:${port}`,
+    databasePath,
     token: accessCode,
     async stop() {
       if (!exited) {

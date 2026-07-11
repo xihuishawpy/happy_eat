@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { api, startTestServer } from "./helpers/server.js";
 
@@ -172,6 +173,53 @@ test("菜谱导入 creates 草稿 and confirming it makes it a 正式菜谱", as
     assert.equal(savedRecipe.title, "丝瓜鲜虾汤");
     assert.equal(savedRecipe.ingredients.some((item) => item.quantityLabel === "3根"), true);
     assert.equal(savedRecipe.steps.length > 0, true);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("正式菜谱 can be edited and deleted", async () => {
+  const server = await startTestServer();
+
+  try {
+    const initial = await api(server, "/api/app");
+    const recipe = [...initial.payload.matches.ready, ...initial.payload.matches.missing]
+      .find((item) => item.title === "番茄炒蛋");
+
+    const updated = await api(server, `/api/recipes/${recipe.id}`, {
+      method: "PATCH",
+      body: {
+        title: "家常番茄炒蛋",
+        method: "炒",
+        minutes: 12,
+        preferenceWarning: "",
+        ingredients: [
+          { name: "番茄", quantityLabel: "2个", required: true },
+          { name: "鸡蛋", quantityLabel: "3个", required: true },
+        ],
+        steps: ["番茄切块。", "鸡蛋炒熟后加入番茄。"],
+      },
+    });
+
+    assert.equal(updated.response.status, 200);
+    const saved = [...updated.payload.app.matches.ready, ...updated.payload.app.matches.missing]
+      .find((item) => item.id === recipe.id);
+    assert.equal(saved.title, "家常番茄炒蛋");
+    assert.equal(saved.minutes, 12);
+    assert.equal(saved.ingredients.some((item) => item.quantityLabel === "3个"), true);
+
+    const removed = await api(server, `/api/recipes/${recipe.id}`, { method: "DELETE" });
+    assert.equal(removed.response.status, 200);
+    assert.equal(
+      [...removed.payload.matches.ready, ...removed.payload.matches.missing]
+        .some((item) => item.id === recipe.id),
+      false,
+    );
+
+    const database = new DatabaseSync(server.databasePath);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM recipe_ingredients WHERE recipe_id = ?").get(recipe.id).count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM recipe_steps WHERE recipe_id = ?").get(recipe.id).count, 0);
+    database.close();
   } finally {
     await server.stop();
   }
