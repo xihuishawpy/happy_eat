@@ -65,6 +65,7 @@ export default function App() {
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [cookingRecipe, setCookingRecipe] = useState(null);
   const [ingredientEditor, setIngredientEditor] = useState(null);
+  const [generationSelectorOpen, setGenerationSelectorOpen] = useState(false);
   const [draftEditor, setDraftEditor] = useState(null);
   const [recipeEditor, setRecipeEditor] = useState(null);
   const [pendingAction, setPendingAction] = useState("");
@@ -286,14 +287,19 @@ export default function App() {
     }
   }
 
-  async function generateRecipe() {
+  async function generateRecipe(ingredientIds) {
     setPendingAction("recipe-generate");
     setSyncState("syncing");
     setError("");
     try {
-      const result = await api("/api/recipes/generate", { token, method: "POST" });
+      const result = await api("/api/recipes/generate", {
+        token,
+        method: "POST",
+        body: { ingredientIds },
+      });
       setApp(result.app);
       setActiveTab("drafts");
+      setGenerationSelectorOpen(false);
       setDraftEditor(result.draft);
       setSyncState("synced");
     } catch (err) {
@@ -551,7 +557,10 @@ export default function App() {
             <button
               className="wide-primary"
               type="button"
-              onClick={generateRecipe}
+              onClick={() => {
+                setError("");
+                setGenerationSelectorOpen(true);
+              }}
               disabled={busy || !app.ai.configured || app.ingredients.length === 0}
             >
               <Sparkles size={22} />
@@ -674,6 +683,19 @@ export default function App() {
 
       {cookingRecipe && <CookingMode recipe={cookingRecipe} onClose={() => setCookingRecipe(null)} />}
 
+      {generationSelectorOpen && (
+        <IngredientSelectionSheet
+          categories={app.categories}
+          busy={pendingAction === "recipe-generate"}
+          error={error}
+          onGenerate={generateRecipe}
+          onClose={() => {
+            setGenerationSelectorOpen(false);
+            setError("");
+          }}
+        />
+      )}
+
       {ingredientEditor && (
         <IngredientEditorSheet
           key={ingredientEditor.id ?? "new"}
@@ -717,6 +739,98 @@ export default function App() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function IngredientSelectionSheet({ categories, busy, error, onGenerate, onClose }) {
+  const [selectedIds, setSelectedIds] = useState([]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function closeOnEscape(event) {
+      if (event.key === "Escape" && !busy) onClose();
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [busy, onClose]);
+
+  function toggleIngredient(id) {
+    setSelectedIds((current) => current.includes(id)
+      ? current.filter((item) => item !== id)
+      : [...current, id]);
+  }
+
+  return (
+    <div className="sheet-backdrop" role="presentation" onClick={() => !busy && onClose()}>
+      <section
+        className="ingredient-selection-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ingredient-selection-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sheet-handle" aria-hidden="true" />
+        <header className="sheet-header">
+          <div>
+            <h2 id="ingredient-selection-title">选择想用的食材</h2>
+            <p>不选择时将使用全部库存生成。</p>
+          </div>
+          <button className="close-button" type="button" onClick={onClose} disabled={busy} aria-label="关闭食材选择">
+            <X size={23} />
+          </button>
+        </header>
+
+        <div className="ingredient-selection-content">
+          {categories.map((category) => (
+            <section className="selection-category" key={category.name} aria-labelledby={`selection-${category.name}`}>
+              <h3 id={`selection-${category.name}`}>{category.name}</h3>
+              <div className="selection-chip-grid">
+                {category.items.map((ingredient) => {
+                  const selected = selectedIds.includes(ingredient.id);
+                  return (
+                    <button
+                      key={ingredient.id}
+                      className={selected ? "selection-chip selected" : "selection-chip"}
+                      type="button"
+                      aria-label={`选择${ingredient.name}`}
+                      aria-pressed={selected}
+                      onClick={() => toggleIngredient(ingredient.id)}
+                      disabled={busy}
+                    >
+                      {selected && <Check size={16} aria-hidden="true" />}
+                      <span>{ingredient.name}</span>
+                      {stateLabels[ingredient.state] && <small>{stateLabels[ingredient.state]}</small>}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+
+        {error && <div className="form-error" role="alert">{error}</div>}
+
+        <div className="selection-actions">
+          {selectedIds.length > 0 && (
+            <button className="text-button" type="button" onClick={() => setSelectedIds([])} disabled={busy}>清除选择</button>
+          )}
+          <button className="primary-button" type="button" onClick={() => onGenerate(selectedIds)} disabled={busy}>
+            <Sparkles size={18} />
+            {busy
+              ? "正在生成菜谱"
+              : selectedIds.length > 0
+                ? `用已选 ${selectedIds.length} 种食材生成`
+                : "用全部食材生成"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

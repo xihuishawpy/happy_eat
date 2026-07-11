@@ -221,7 +221,13 @@ test("LLM can generate a recipe draft from available ingredients", async () => {
   });
 
   try {
-    const generated = await api(server, "/api/recipes/generate", { method: "POST" });
+    const initial = await api(server, "/api/app");
+    const selected = initial.payload.ingredients.filter((item) => ["番茄", "鸡蛋"].includes(item.name));
+    const excluded = initial.payload.ingredients.find((item) => !["番茄", "鸡蛋"].includes(item.name));
+    const generated = await api(server, "/api/recipes/generate", {
+      method: "POST",
+      body: { ingredientIds: selected.map((item) => item.id) },
+    });
 
     assert.equal(generated.response.status, 200);
     assert.equal(generated.payload.draft.title, "番茄炒蛋");
@@ -230,9 +236,19 @@ test("LLM can generate a recipe draft from available ingredients", async () => {
     assert.equal(generated.payload.draft.ingredients.some((item) => item.name === "番茄"), true);
     assert.equal(requestBody.model, "test-model");
     assert.match(requestBody.messages[1].content, /现有食材/);
+    assert.doesNotMatch(requestBody.messages[1].content, new RegExp(`现有食材：[^\n]*${excluded.name}`));
+
+    const unknownSelection = await api(server, "/api/recipes/generate", {
+      method: "POST",
+      body: { ingredientIds: [999999] },
+    });
+    assert.equal(unknownSelection.response.status, 422);
 
     responseRecipe = { ...responseRecipe, requiredIngredients: [{ name: "牛肉", quantityLabel: "200克" }] };
-    const hallucinated = await api(server, "/api/recipes/generate", { method: "POST" });
+    const hallucinated = await api(server, "/api/recipes/generate", {
+      method: "POST",
+      body: { ingredientIds: selected.map((item) => item.id) },
+    });
     assert.equal(hallucinated.response.status, 502);
     assert.equal((await api(server, "/api/app")).payload.drafts.length, 1);
   } finally {

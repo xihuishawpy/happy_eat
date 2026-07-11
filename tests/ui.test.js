@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import test from "node:test";
 import { chromium } from "playwright";
 import { api, startTestServer } from "./helpers/server.js";
@@ -154,5 +156,66 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
   } finally {
     await browser?.close();
     await server.stop();
+  }
+});
+
+test("家庭成员 can select ingredients for AI recipe generation", { skip: process.env.RUN_PLAYWRIGHT_UI !== "1" }, async () => {
+  const llm = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              title: "自选番茄炒蛋",
+              method: "炒",
+              minutes: 15,
+              preferenceWarning: "",
+              requiredIngredients: [
+                { name: "番茄", quantityLabel: "2个" },
+                { name: "鸡蛋", quantityLabel: "2个" },
+              ],
+              optionalIngredients: [{ name: "生抽", quantityLabel: "1勺" }],
+              steps: ["番茄切块，鸡蛋打散。", "鸡蛋炒熟后加入番茄。"],
+            }),
+          },
+        }],
+      }));
+    });
+  });
+  llm.listen(0, "127.0.0.1");
+  await once(llm, "listening");
+  const server = await startTestServer({
+    env: {
+      DASHSCOPE_API_KEY: "test-key",
+      DASHSCOPE_BASE_URL: `http://127.0.0.1:${llm.address().port}`,
+    },
+  });
+  let browser;
+
+  try {
+    browser = await chromium.launch();
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.goto(server.baseUrl);
+    await page.getByLabel("家庭访问码").fill(server.accessCode);
+    await page.getByRole("button", { name: "进入" }).click();
+
+    await page.getByRole("button", { name: "AI 生成菜谱" }).click();
+    const selector = page.getByRole("dialog", { name: "选择想用的食材" });
+    await selector.getByRole("button", { name: "选择番茄" }).click();
+    await selector.getByRole("button", { name: "选择鸡蛋" }).click();
+    assert.equal(await selector.getByRole("button", { name: "选择番茄" }).getAttribute("aria-pressed"), "true");
+    await selector.getByRole("button", { name: "用已选 2 种食材生成" }).click();
+
+    const editor = page.getByRole("dialog", { name: "检查菜谱草稿" });
+    await editor.waitFor();
+    assert.equal(await editor.getByLabel("菜谱标题").inputValue(), "自选番茄炒蛋");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+  } finally {
+    await browser?.close();
+    await server.stop();
+    llm.close();
+    await once(llm, "close");
   }
 });

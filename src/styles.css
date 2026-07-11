@@ -790,7 +790,8 @@ a:focus-visible {
   padding: 10px 14px calc(18px + env(safe-area-inset-bottom));
 }
 
-.ingredient-sheet {
+.ingredient-sheet,
+.ingredient-selection-sheet {
   width: min(100%, 560px);
   max-height: min(90dvh, 760px);
   margin: 0 auto;
@@ -801,6 +802,74 @@ a:focus-visible {
   border-radius: 8px 8px 0 0;
   box-shadow: 0 -18px 40px rgba(22, 31, 27, 0.2);
   padding: 10px 14px calc(18px + env(safe-area-inset-bottom));
+}
+
+.ingredient-selection-content {
+  display: grid;
+  gap: 18px;
+  padding: 16px 0;
+}
+
+.selection-category {
+  display: grid;
+  gap: 8px;
+}
+
+.selection-category h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.selection-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.selection-chip {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 11px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.selection-chip.selected {
+  border-color: rgba(10, 148, 63, 0.6);
+  background: #eaf8ef;
+  color: #087832;
+  font-weight: 700;
+}
+
+.selection-chip small {
+  color: var(--orange);
+  font-size: 11px;
+}
+
+.selection-actions {
+  position: sticky;
+  bottom: calc(-18px - env(safe-area-inset-bottom));
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  background: #fff;
+  padding: 12px 0 calc(18px + env(safe-area-inset-bottom));
+}
+
+.selection-actions .primary-button {
+  width: 100%;
+}
+
+.selection-actions .text-button {
+  justify-self: end;
 }
 
 .sheet-handle {

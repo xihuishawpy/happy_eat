@@ -64,7 +64,7 @@ export default {
       }
 
       if (request.method === "POST" && pathname === "/api/recipes/generate") {
-        return await generateRecipeDraft(env);
+        return await generateRecipeDraft(request, env);
       }
 
       const draftMatch = pathname.match(/^\/api\/drafts\/([^/]+)$/);
@@ -211,15 +211,29 @@ async function analyzeDraft(request, env) {
   return json({ draft, app: await readAppState(env) });
 }
 
-async function generateRecipeDraft(env) {
+async function generateRecipeDraft(request, env) {
   if (!env.DASHSCOPE_API_KEY) return json({ error: "AI 菜谱生成尚未配置" }, 503);
+  const body = request.body ? await readJson(request) : {};
+  const hasSelection = Object.hasOwn(body || {}, "ingredientIds");
+  if (hasSelection && !Array.isArray(body.ingredientIds)) return json({ error: "食材选择无效" }, 422);
+  const ingredientIds = [...new Set((body?.ingredientIds || []).map(Number))];
+  if (ingredientIds.length > 100 || ingredientIds.some((id) => !Number.isInteger(id) || id <= 0)) {
+    return json({ error: "食材选择无效" }, 422);
+  }
+  const where = ingredientIds.length > 0
+    ? `WHERE id IN (${ingredientIds.map(() => "?").join(", ")})`
+    : "";
+  const statement = env.DB.prepare(`
+    SELECT id, name, state FROM ingredients ${where}
+    ORDER BY CASE state WHEN 'expiring' THEN 0 WHEN 'priority' THEN 1 ELSE 2 END, name
+  `);
   const [result] = await env.DB.batch([
-    env.DB.prepare(`
-      SELECT name, state FROM ingredients
-      ORDER BY CASE state WHEN 'expiring' THEN 0 WHEN 'priority' THEN 1 ELSE 2 END, name
-    `),
+    ingredientIds.length > 0 ? statement.bind(...ingredientIds) : statement,
   ]);
   if (result.results.length === 0) return json({ error: "请先添加可用食材" }, 422);
+  if (ingredientIds.length > 0 && result.results.length !== ingredientIds.length) {
+    return json({ error: "所选食材已不存在，请重新选择" }, 422);
+  }
 
   const sourceText = formatAvailableIngredients(result.results);
   const draft = await createRecipeDraft("generated", sourceText, "", env, result.results);

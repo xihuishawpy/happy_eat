@@ -203,12 +203,26 @@ app.post("/api/recipes/generate", async (req, res) => {
     return res.status(503).json({ error: "AI 菜谱生成尚未配置" });
   }
 
+  const hasSelection = Object.hasOwn(req.body || {}, "ingredientIds");
+  if (hasSelection && !Array.isArray(req.body.ingredientIds)) {
+    return res.status(422).json({ error: "食材选择无效" });
+  }
+  const ingredientIds = [...new Set((req.body?.ingredientIds || []).map(Number))];
+  if (ingredientIds.length > 100 || ingredientIds.some((id) => !Number.isInteger(id) || id <= 0)) {
+    return res.status(422).json({ error: "食材选择无效" });
+  }
+  const where = ingredientIds.length > 0
+    ? `WHERE id IN (${ingredientIds.map(() => "?").join(", ")})`
+    : "";
   const ingredients = db.prepare(`
-    SELECT name, state FROM ingredients
+    SELECT id, name, state FROM ingredients ${where}
     ORDER BY CASE state WHEN 'expiring' THEN 0 WHEN 'priority' THEN 1 ELSE 2 END, name
-  `).all();
+  `).all(...ingredientIds);
   if (ingredients.length === 0) {
     return res.status(422).json({ error: "请先添加可用食材" });
+  }
+  if (ingredientIds.length > 0 && ingredients.length !== ingredientIds.length) {
+    return res.status(422).json({ error: "所选食材已不存在，请重新选择" });
   }
 
   const sourceText = formatAvailableIngredients(ingredients);

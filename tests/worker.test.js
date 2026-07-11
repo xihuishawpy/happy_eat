@@ -111,7 +111,10 @@ test("Cloudflare Worker enforces public request boundaries", async () => {
     });
     assert.equal(privateWebPage.status, 422);
 
-    const unavailableGeneration = await callWorker(env, "/api/recipes/generate", { method: "POST" });
+    const unavailableGeneration = await callWorker(env, "/api/recipes/generate", {
+      method: "POST",
+      body: { ingredientIds: [1] },
+    });
     assert.equal(unavailableGeneration.status, 503);
   } finally {
     database.close();
@@ -142,7 +145,10 @@ test("Cloudflare Worker generates a draft from D1 ingredients", async () => {
   });
 
   try {
-    const generated = await callWorker(env, "/api/recipes/generate", { method: "POST" });
+    const generated = await callWorker(env, "/api/recipes/generate", {
+      method: "POST",
+      body: { ingredientIds: [1, 2] },
+    });
     assert.equal(generated.status, 200);
     assert.equal(generated.payload.draft.title, "番茄炒蛋");
     assert.equal(generated.payload.draft.sourceType, "generated");
