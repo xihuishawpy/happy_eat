@@ -384,7 +384,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="mobile-main" id="main-content">
+      <main className={`mobile-main ${activeTab}-view`} id="main-content">
         {activeTab === "ingredients" && (
           <section className="panel ingredient-panel" aria-labelledby="ingredient-title">
             <div className="section-title">
@@ -522,55 +522,55 @@ export default function App() {
         )}
 
         {activeTab === "today" && (
-          <section className="panel today-ingredient-entry" aria-labelledby="today-ingredient-title">
-            <div className="section-title compact">
-              <div>
-                <h2 id="today-ingredient-title">家里食材有变化？</h2>
-                <p>更新后可做菜谱会立即重排。</p>
-              </div>
-              <button className="text-button" type="button" onClick={() => setShowTodayIngredientInput((current) => !current)}>
-                {showTodayIngredientInput ? "收起" : "更新食材"}
-              </button>
-            </div>
-            {showTodayIngredientInput && (
-              <div className="today-ingredient-form">
-                <label className="input-wrap">
-                  <textarea
-                    value={batchText}
-                    onChange={(event) => setBatchText(event.target.value)}
-                    placeholder="例如：鸡蛋、番茄、冷冻虾仁"
-                    rows={2}
-                    autoFocus
-                  />
-                </label>
-                <button className="primary-button" type="button" onClick={addBatchIngredients} disabled={busy || !batchText.trim()}>
-                  <Sparkles size={18} />
-                  {pendingAction === "batch" ? "正在添加" : "解析并添加"}
+          <aside className="today-sidebar" aria-label="今日操作">
+            <section className="panel today-ingredient-entry" aria-labelledby="today-ingredient-title">
+              <div className="section-title compact">
+                <div>
+                  <h2 id="today-ingredient-title">家里食材有变化？</h2>
+                  <p>更新后可做菜谱会立即重排。</p>
+                </div>
+                <button className="text-button" type="button" onClick={() => setShowTodayIngredientInput((current) => !current)}>
+                  {showTodayIngredientInput ? "收起" : "更新食材"}
                 </button>
               </div>
-            )}
-          </section>
-        )}
+              {showTodayIngredientInput && (
+                <div className="today-ingredient-form">
+                  <label className="input-wrap">
+                    <textarea
+                      value={batchText}
+                      onChange={(event) => setBatchText(event.target.value)}
+                      placeholder="例如：鸡蛋、番茄、冷冻虾仁"
+                      rows={2}
+                      autoFocus
+                    />
+                  </label>
+                  <button className="primary-button" type="button" onClick={addBatchIngredients} disabled={busy || !batchText.trim()}>
+                    <Sparkles size={18} />
+                    {pendingAction === "batch" ? "正在添加" : "解析并添加"}
+                  </button>
+                </div>
+              )}
+            </section>
 
-        {activeTab === "today" && (
-          <section className="draft-action">
-            <button
-              className="wide-primary"
-              type="button"
-              onClick={() => {
-                setError("");
-                setGenerationSelectorOpen(true);
-              }}
-              disabled={busy || !app.ai.configured || app.ingredients.length === 0}
-            >
-              <Sparkles size={22} />
-              {pendingAction === "recipe-generate" ? "正在生成菜谱" : "AI 生成菜谱"}
-            </button>
-            <button className="secondary-button" type="button" onClick={() => setActiveTab("drafts")} disabled={busy}>
-              <Plus size={24} />
-              导入菜谱
-            </button>
-          </section>
+            <section className="draft-action">
+              <button
+                className="wide-primary"
+                type="button"
+                onClick={() => {
+                  setError("");
+                  setGenerationSelectorOpen(true);
+                }}
+                disabled={busy || !app.ai.configured || app.ingredients.length === 0}
+              >
+                <Sparkles size={22} />
+                {pendingAction === "recipe-generate" ? "正在生成菜谱" : "AI 生成菜谱"}
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setActiveTab("drafts")} disabled={busy}>
+                <Plus size={24} />
+                导入菜谱
+              </button>
+            </section>
+          </aside>
         )}
 
         {activeTab === "drafts" && (
