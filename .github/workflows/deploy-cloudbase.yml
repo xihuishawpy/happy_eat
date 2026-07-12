@@ -63,3 +63,10 @@ jobs:
             --header "Content-Type: application/json" \
             --data '{"ingredientIds":"invalid"}')
           test "$status" = "422"
+
+          completion_status=$(curl --silent --show-error --output /tmp/completion-response.json --write-out "%{http_code}" \
+            --request POST "$VITE_API_BASE_URL/api/recipes/1/complete" \
+            --header "Authorization: Bearer $FAMILY_ACCESS_CODE" \
+            --header "Content-Type: application/json" \
+            --data '{"consumptions":"invalid"}')
+          test "$completion_status" = "422"

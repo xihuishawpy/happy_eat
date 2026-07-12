@@ -1,4 +1,5 @@
 import express from "express";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
@@ -61,6 +62,14 @@ db.exec(`
     position INTEGER NOT NULL,
     text TEXT NOT NULL,
     FOREIGN KEY(recipe_id) REFERENCES recipes(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS consumption_events (
+    id TEXT PRIMARY KEY,
+    recipe_id INTEGER NOT NULL,
+    changes_json TEXT NOT NULL,
+    undone INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
   );
 `);
 
@@ -228,6 +237,82 @@ app.post("/api/recipes/generate", async (req, res) => {
   const sourceText = formatAvailableIngredients(ingredients);
   const draft = await createRecipeDraft("generated", sourceText, "", ingredients);
   res.json({ draft, app: readAppState() });
+});
+
+app.post("/api/recipes/:id/complete", (req, res) => {
+  let consumptions;
+  try {
+    consumptions = normalizeConsumptions(req.body?.consumptions);
+  } catch (error) {
+    return res.status(422).json({ error: error.message });
+  }
+
+  const recipe = db.prepare("SELECT id FROM recipes WHERE id = ? AND status = 'formal'").get(req.params.id);
+  if (!recipe) return res.status(404).json({ error: "\u6b63\u5f0f\u83dc\u8c31\u4e0d\u5b58\u5728" });
+  const requiredNames = new Set(db.prepare(`
+    SELECT name FROM recipe_ingredients WHERE recipe_id = ? AND required = 1
+  `).all(req.params.id).map((item) => item.name));
+  if (consumptions.some((item) => !requiredNames.has(item.name))) {
+    return res.status(422).json({ error: "\u6d88\u8017\u98df\u6750\u4e0d\u5728\u8fd9\u9053\u83dc\u7684\u5fc5\u9700\u6e05\u5355\u4e2d" });
+  }
+
+  const changes = [];
+  const eventId = randomUUID();
+  runInTransaction(() => {
+    for (const consumption of consumptions) {
+      if (consumption.action === "kept") continue;
+      const ingredient = db.prepare("SELECT id, name, category, state FROM ingredients WHERE name = ?").get(consumption.name);
+      if (!ingredient) continue;
+      if (consumption.action === "used_up") {
+        db.prepare("DELETE FROM ingredients WHERE id = ?").run(ingredient.id);
+        changes.push({ action: "used_up", before: ingredient });
+      } else if (ingredient.state !== "priority") {
+        db.prepare("UPDATE ingredients SET state = 'priority' WHERE id = ?").run(ingredient.id);
+        changes.push({ action: "low", before: ingredient });
+      }
+    }
+    if (changes.length > 0) {
+      db.prepare(`
+        INSERT INTO consumption_events (id, recipe_id, changes_json, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(eventId, recipe.id, JSON.stringify(changes), new Date().toISOString());
+    }
+  });
+
+  res.json({
+    app: readAppState(),
+    undoId: changes.length > 0 ? eventId : null,
+    summary: {
+      removed: changes.filter((item) => item.action === "used_up").length,
+      prioritized: changes.filter((item) => item.action === "low").length,
+    },
+  });
+});
+
+app.post("/api/consumption-events/:id/undo", (req, res) => {
+  const event = db.prepare("SELECT * FROM consumption_events WHERE id = ?").get(req.params.id);
+  if (!event) return res.status(404).json({ error: "\u64a4\u9500\u8bb0\u5f55\u4e0d\u5b58\u5728" });
+  if (event.undone) return res.status(409).json({ error: "\u8fd9\u6b21\u5e93\u5b58\u53d8\u5316\u5df2\u7ecf\u64a4\u9500" });
+
+  const changes = JSON.parse(event.changes_json);
+  runInTransaction(() => {
+    for (const change of changes) {
+      const ingredient = change.before;
+      if (change.action === "used_up") {
+        db.prepare(`
+          INSERT INTO ingredients (name, category, state)
+          VALUES (?, ?, ?)
+          ON CONFLICT(name) DO NOTHING
+        `).run(ingredient.name, ingredient.category, ingredient.state);
+      } else {
+        db.prepare("UPDATE ingredients SET state = ? WHERE name = ? AND state = 'priority'")
+          .run(ingredient.state, ingredient.name);
+      }
+    }
+    db.prepare("UPDATE consumption_events SET undone = 1 WHERE id = ?").run(event.id);
+  });
+
+  res.json({ app: readAppState(), undone: true });
 });
 
 app.patch("/api/drafts/:id", (req, res) => updateRecipe(req, res, "draft"));
@@ -553,6 +638,22 @@ async function createRecipeDraft(sourceType, sourceText, imageDataUrl = "", gene
   });
 
   return readAppState().drafts.find((draft) => draft.id === recipeId);
+}
+
+function normalizeConsumptions(value) {
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new Error("\u6d88\u8017\u98df\u6750\u683c\u5f0f\u65e0\u6548");
+  }
+  const seen = new Set();
+  return value.map((item) => {
+    const name = normalizeIngredientName(String(item?.name || ""));
+    const action = String(item?.action || "");
+    if (!name || !["used_up", "low", "kept"].includes(action) || seen.has(name)) {
+      throw new Error("\u6d88\u8017\u98df\u6750\u683c\u5f0f\u65e0\u6548");
+    }
+    seen.add(name);
+    return { name, action };
+  });
 }
 
 function formatAvailableIngredients(ingredients) {

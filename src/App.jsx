@@ -68,6 +68,7 @@ export default function App() {
   const [generationSelectorOpen, setGenerationSelectorOpen] = useState(false);
   const [draftEditor, setDraftEditor] = useState(null);
   const [recipeEditor, setRecipeEditor] = useState(null);
+  const [completionNotice, setCompletionNotice] = useState(null);
   const [pendingAction, setPendingAction] = useState("");
   const [error, setError] = useState("");
   const [syncState, setSyncState] = useState("synced");
@@ -350,6 +351,58 @@ export default function App() {
     }
   }
 
+  async function completeCooking(recipe, consumptions) {
+    setPendingAction("cooking-complete");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const result = await api(`/api/recipes/${recipe.id}/complete`, {
+        token,
+        method: "POST",
+        body: { consumptions },
+      });
+      const changes = [];
+      if (result.summary.removed > 0) changes.push(`移除 ${result.summary.removed} 项`);
+      if (result.summary.prioritized > 0) changes.push(`${result.summary.prioritized} 项标记为优先`);
+      setApp(result.app);
+      setCookingRecipe(null);
+      setSelectedRecipe(null);
+      sessionStorage.removeItem(`happy-eat-cooking-${recipe.id}`);
+      setCompletionNotice({
+        message: changes.length > 0 ? `库存已更新：${changes.join("，")}` : "已完成烹饪，库存没有变化",
+        undoId: result.undoId,
+      });
+      setSyncState("synced");
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+      throw err;
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function undoCookingCompletion() {
+    if (!completionNotice?.undoId) return;
+    setPendingAction("cooking-undo");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const result = await api(`/api/consumption-events/${completionNotice.undoId}/undo`, {
+        token,
+        method: "POST",
+      });
+      setApp(result.app);
+      setCompletionNotice({ message: "已撤销本次库存变化", undoId: null });
+      setSyncState("synced");
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
   function clearRecipeFilters() {
     setRecipeQuery("");
     setRecipeMethod("");
@@ -379,6 +432,20 @@ export default function App() {
         <div className="notice" role="alert">
           <span>{error}</span>
           <button type="button" onClick={() => setError("")} aria-label="关闭错误提示">
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
+      {completionNotice && (
+        <div className="undo-toast" role="status">
+          <span>{completionNotice.message}</span>
+          {completionNotice.undoId && (
+            <button type="button" onClick={undoCookingCompletion} disabled={pendingAction === "cooking-undo"}>
+              {pendingAction === "cooking-undo" ? "撤销中" : "撤销"}
+            </button>
+          )}
+          <button className="undo-toast-close" type="button" onClick={() => setCompletionNotice(null)} aria-label="关闭提示">
             <X size={18} />
           </button>
         </div>
@@ -677,11 +744,24 @@ export default function App() {
           onStartCooking={() => {
             setCookingRecipe(selectedRecipe);
             setSelectedRecipe(null);
+            setCompletionNotice(null);
+            setError("");
           }}
         />
       )}
 
-      {cookingRecipe && <CookingMode recipe={cookingRecipe} onClose={() => setCookingRecipe(null)} />}
+      {cookingRecipe && (
+        <CookingMode
+          recipe={cookingRecipe}
+          busy={pendingAction === "cooking-complete"}
+          error={error}
+          onComplete={(consumptions) => completeCooking(cookingRecipe, consumptions)}
+          onClose={() => {
+            setCookingRecipe(null);
+            setError("");
+          }}
+        />
+      )}
 
       {generationSelectorOpen && (
         <IngredientSelectionSheet
@@ -1287,9 +1367,11 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
   );
 }
 
-function CookingMode({ recipe, onClose }) {
+function CookingMode({ recipe, busy, error, onComplete, onClose }) {
   const required = recipe.ingredients.filter((item) => item.required);
   const storageKey = `happy-eat-cooking-${recipe.id}`;
+  const [confirming, setConfirming] = useState(false);
+  const [consumptions, setConsumptions] = useState(() => Object.fromEntries(required.map((item) => [item.name, "kept"])));
   const [progress, setProgress] = useState(() => {
     try {
       return JSON.parse(sessionStorage.getItem(storageKey)) || { ingredients: [], steps: [] };
@@ -1313,6 +1395,18 @@ function CookingMode({ recipe, onClose }) {
 
   const completed = progress.ingredients.length + progress.steps.length;
   const total = required.length + recipe.steps.length;
+
+  function setConsumption(name, action) {
+    setConsumptions((current) => ({ ...current, [name]: action }));
+  }
+
+  async function finishCooking(forceNoChanges = false) {
+    const values = required.map((item) => ({
+      name: item.name,
+      action: forceNoChanges ? "kept" : consumptions[item.name],
+    }));
+    await onComplete(values).catch(() => {});
+  }
 
   return (
     <div className="cooking-mode" role="dialog" aria-modal="true" aria-labelledby="cooking-title">
@@ -1358,6 +1452,71 @@ function CookingMode({ recipe, onClose }) {
           </div>
         </section>
       </main>
+
+      <footer className="cooking-footer">
+        <button className="wide-primary" type="button" onClick={() => setConfirming(true)} disabled={busy}>
+          <Check size={20} />
+          完成烹饪
+        </button>
+      </footer>
+
+      {confirming && (
+        <div className="consumption-backdrop" role="presentation">
+          <section className="consumption-sheet" role="dialog" aria-modal="true" aria-labelledby="consumption-title">
+            <header className="sheet-header">
+              <div>
+                <h2 id="consumption-title">这次用掉了什么？</h2>
+                <p>确认后会立即更新家里的食材。</p>
+              </div>
+              <button className="close-button" type="button" onClick={() => setConfirming(false)} disabled={busy} aria-label="关闭消耗确认">
+                <X size={22} />
+              </button>
+            </header>
+
+            <div className="consumption-list">
+              {required.map((item) => (
+                <div className="consumption-row" key={item.name}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    {item.quantityLabel && <span>{item.quantityLabel}</span>}
+                  </div>
+                  <div className="consumption-options" role="radiogroup" aria-label={`${item.name}剩余情况`}>
+                    {[
+                      { value: "kept", label: "还有" },
+                      { value: "low", label: "剩不多" },
+                      { value: "used_up", label: "用完了" },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        className={`${option.value} ${consumptions[item.name] === option.value ? "active" : ""}`}
+                        type="button"
+                        role="radio"
+                        aria-checked={consumptions[item.name] === option.value}
+                        onClick={() => setConsumption(item.name, option.value)}
+                        disabled={busy}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {error && <p className="sheet-error" role="alert">{error}</p>}
+
+            <div className="consumption-actions">
+              <button className="secondary-button" type="button" onClick={() => finishCooking(true)} disabled={busy}>
+                库存没变化
+              </button>
+              <button className="primary-button" type="button" onClick={() => finishCooking(false)} disabled={busy}>
+                <Check size={18} />
+                {busy ? "正在更新" : "确认并更新"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

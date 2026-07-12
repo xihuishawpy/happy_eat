@@ -67,6 +67,16 @@ export default {
         return await generateRecipeDraft(request, env);
       }
 
+      const completeMatch = pathname.match(/^\/api\/recipes\/([^/]+)\/complete$/);
+      if (completeMatch && request.method === "POST") {
+        return await completeCooking(request, env, completeMatch[1]);
+      }
+
+      const undoMatch = pathname.match(/^\/api\/consumption-events\/([^/]+)\/undo$/);
+      if (undoMatch && request.method === "POST") {
+        return await undoConsumption(env, undoMatch[1]);
+      }
+
       const draftMatch = pathname.match(/^\/api\/drafts\/([^/]+)$/);
       if (draftMatch && request.method === "PATCH") {
         return await updateRecipe(request, env, draftMatch[1], "draft");
@@ -238,6 +248,77 @@ async function generateRecipeDraft(request, env) {
   const sourceText = formatAvailableIngredients(result.results);
   const draft = await createRecipeDraft("generated", sourceText, "", env, result.results);
   return json({ draft, app: await readAppState(env) });
+}
+
+async function completeCooking(request, env, recipeId) {
+  const body = await readJson(request);
+  const consumptions = normalizeConsumptions(body?.consumptions);
+  const recipe = await env.DB.prepare("SELECT id FROM recipes WHERE id = ? AND status = 'formal'")
+    .bind(recipeId).first();
+  if (!recipe) throw httpError(404, "\u6b63\u5f0f\u83dc\u8c31\u4e0d\u5b58\u5728");
+
+  const [requiredResult, inventoryResult] = await env.DB.batch([
+    env.DB.prepare("SELECT name FROM recipe_ingredients WHERE recipe_id = ? AND required = 1").bind(recipeId),
+    env.DB.prepare("SELECT id, name, category, state FROM ingredients"),
+  ]);
+  const requiredNames = new Set(requiredResult.results.map((item) => item.name));
+  if (consumptions.some((item) => !requiredNames.has(item.name))) {
+    throw httpError(422, "\u6d88\u8017\u98df\u6750\u4e0d\u5728\u8fd9\u9053\u83dc\u7684\u5fc5\u9700\u6e05\u5355\u4e2d");
+  }
+
+  const inventoryByName = new Map(inventoryResult.results.map((item) => [item.name, item]));
+  const changes = [];
+  const statements = [];
+  for (const consumption of consumptions) {
+    if (consumption.action === "kept") continue;
+    const ingredient = inventoryByName.get(consumption.name);
+    if (!ingredient) continue;
+    if (consumption.action === "used_up") {
+      statements.push(env.DB.prepare("DELETE FROM ingredients WHERE id = ?").bind(ingredient.id));
+      changes.push({ action: "used_up", before: ingredient });
+    } else if (ingredient.state !== "priority") {
+      statements.push(env.DB.prepare("UPDATE ingredients SET state = 'priority' WHERE id = ?").bind(ingredient.id));
+      changes.push({ action: "low", before: ingredient });
+    }
+  }
+
+  const undoId = changes.length > 0 ? crypto.randomUUID() : null;
+  if (undoId) {
+    statements.push(env.DB.prepare(`
+      INSERT INTO consumption_events (id, recipe_id, changes_json, created_at)
+      VALUES (?, ?, ?, ?)
+    `).bind(undoId, recipe.id, JSON.stringify(changes), new Date().toISOString()));
+  }
+  if (statements.length > 0) await env.DB.batch(statements);
+
+  return json({
+    app: await readAppState(env),
+    undoId,
+    summary: {
+      removed: changes.filter((item) => item.action === "used_up").length,
+      prioritized: changes.filter((item) => item.action === "low").length,
+    },
+  });
+}
+
+async function undoConsumption(env, eventId) {
+  const event = await env.DB.prepare("SELECT * FROM consumption_events WHERE id = ?").bind(eventId).first();
+  if (!event) throw httpError(404, "\u64a4\u9500\u8bb0\u5f55\u4e0d\u5b58\u5728");
+  if (event.undone) throw httpError(409, "\u8fd9\u6b21\u5e93\u5b58\u53d8\u5316\u5df2\u7ecf\u64a4\u9500");
+
+  const statements = JSON.parse(event.changes_json).map((change) => {
+    const ingredient = change.before;
+    if (change.action === "used_up") {
+      return env.DB.prepare(`
+        INSERT OR IGNORE INTO ingredients (name, category, state) VALUES (?, ?, ?)
+      `).bind(ingredient.name, ingredient.category, ingredient.state);
+    }
+    return env.DB.prepare("UPDATE ingredients SET state = ? WHERE name = ? AND state = 'priority'")
+      .bind(ingredient.state, ingredient.name);
+  });
+  statements.push(env.DB.prepare("UPDATE consumption_events SET undone = 1 WHERE id = ?").bind(event.id));
+  await env.DB.batch(statements);
+  return json({ app: await readAppState(env), undone: true });
 }
 
 async function updateRecipe(request, env, id, status) {
@@ -500,6 +581,28 @@ async function createRecipeDraft(sourceType, sourceText, imageDataUrl, env, gene
 function formatAvailableIngredients(ingredients) {
   const stateLabels = { expiring: "快过期", priority: "优先用掉", frozen: "冷冻" };
   return ingredients.map((item) => `${item.name}${stateLabels[item.state] ? `（${stateLabels[item.state]}）` : ""}`).join("、");
+}
+
+function normalizeConsumptions(value) {
+  if (!Array.isArray(value) || value.length > 100) {
+    throw httpError(422, "\u6d88\u8017\u98df\u6750\u683c\u5f0f\u65e0\u6548");
+  }
+  const seen = new Set();
+  return value.map((item) => {
+    const name = normalizeIngredientName(String(item?.name || ""));
+    const action = String(item?.action || "");
+    if (!name || !["used_up", "low", "kept"].includes(action) || seen.has(name)) {
+      throw httpError(422, "\u6d88\u8017\u98df\u6750\u683c\u5f0f\u65e0\u6548");
+    }
+    seen.add(name);
+    return { name, action };
+  });
+}
+
+function httpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
 async function generateRecipeWithLLM(sourceText, env) {

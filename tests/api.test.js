@@ -107,6 +107,67 @@ test("食材状态 can be updated and ingredients can be removed", async () => {
   }
 });
 
+test("完成烹饪 updates inventory and undo restores it", async () => {
+  const server = await startTestServer();
+
+  try {
+    const initial = await api(server, "/api/app");
+    const recipes = [...initial.payload.matches.ready, ...initial.payload.matches.missing];
+    const inventoryByName = new Map(initial.payload.ingredients.map((item) => [item.name, item]));
+    let target;
+
+    for (const recipe of recipes) {
+      const available = recipe.ingredients
+        .filter((item) => item.required)
+        .map((item) => inventoryByName.get(item.name))
+        .filter(Boolean);
+      const low = available.find((item) => item.state !== "priority");
+      const removed = available.find((item) => item.id !== low?.id);
+      if (removed && low) {
+        target = { recipe, removed, low };
+        break;
+      }
+    }
+    assert.ok(target, "seed data should include a recipe with two available ingredients");
+
+    const invalid = await api(server, `/api/recipes/${target.recipe.id}/complete`, {
+      method: "POST",
+      body: { consumptions: [{ name: "not-in-recipe", action: "used_up" }] },
+    });
+    assert.equal(invalid.response.status, 422);
+
+    const completed = await api(server, `/api/recipes/${target.recipe.id}/complete`, {
+      method: "POST",
+      body: {
+        consumptions: [
+          { name: target.removed.name, action: "used_up" },
+          { name: target.low.name, action: "low" },
+        ],
+      },
+    });
+
+    assert.equal(completed.response.status, 200);
+    assert.equal(typeof completed.payload.undoId, "string");
+    assert.deepEqual(completed.payload.summary, { removed: 1, prioritized: 1 });
+    assert.equal(completed.payload.app.ingredients.some((item) => item.name === target.removed.name), false);
+    assert.equal(completed.payload.app.ingredients.find((item) => item.name === target.low.name).state, "priority");
+
+    const undone = await api(server, `/api/consumption-events/${completed.payload.undoId}/undo`, {
+      method: "POST",
+    });
+    assert.equal(undone.response.status, 200);
+    assert.equal(undone.payload.app.ingredients.find((item) => item.name === target.removed.name).state, target.removed.state);
+    assert.equal(undone.payload.app.ingredients.find((item) => item.name === target.low.name).state, target.low.state);
+
+    const repeated = await api(server, `/api/consumption-events/${completed.payload.undoId}/undo`, {
+      method: "POST",
+    });
+    assert.equal(repeated.response.status, 409);
+  } finally {
+    await server.stop();
+  }
+});
+
 test("菜谱导入 creates 草稿 and confirming it makes it a 正式菜谱", async () => {
   const server = await startTestServer();
 

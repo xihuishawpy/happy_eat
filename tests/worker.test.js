@@ -159,10 +159,59 @@ test("Cloudflare Worker generates a draft from D1 ingredients", async () => {
   }
 });
 
+test("Cloudflare Worker completes cooking and restores inventory on undo", async () => {
+  const database = createDatabase();
+  const env = createEnv(database);
+
+  try {
+    const initial = await callWorker(env, "/api/app");
+    const recipe = initial.payload.matches.ready[0];
+    const inventoryByName = new Map(initial.payload.ingredients.map((item) => [item.name, item]));
+    const [removed, low] = recipe.ingredients
+      .filter((item) => item.required)
+      .map((item) => inventoryByName.get(item.name));
+
+    const invalid = await callWorker(env, `/api/recipes/${recipe.id}/complete`, {
+      method: "POST",
+      body: { consumptions: [{ name: "not-in-recipe", action: "used_up" }] },
+    });
+    assert.equal(invalid.status, 422);
+
+    const completed = await callWorker(env, `/api/recipes/${recipe.id}/complete`, {
+      method: "POST",
+      body: {
+        consumptions: [
+          { name: removed.name, action: "used_up" },
+          { name: low.name, action: "low" },
+        ],
+      },
+    });
+    assert.equal(completed.status, 200);
+    assert.deepEqual(completed.payload.summary, { removed: 1, prioritized: 1 });
+    assert.equal(completed.payload.app.ingredients.some((item) => item.name === removed.name), false);
+    assert.equal(completed.payload.app.ingredients.find((item) => item.name === low.name).state, "priority");
+
+    const undone = await callWorker(env, `/api/consumption-events/${completed.payload.undoId}/undo`, {
+      method: "POST",
+    });
+    assert.equal(undone.status, 200);
+    assert.equal(undone.payload.app.ingredients.find((item) => item.name === removed.name).state, removed.state);
+    assert.equal(undone.payload.app.ingredients.find((item) => item.name === low.name).state, low.state);
+
+    const repeated = await callWorker(env, `/api/consumption-events/${completed.payload.undoId}/undo`, {
+      method: "POST",
+    });
+    assert.equal(repeated.status, 409);
+  } finally {
+    database.close();
+  }
+});
+
 function createDatabase() {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON");
   database.exec(fs.readFileSync(new URL("../migrations/0001_init.sql", import.meta.url), "utf8"));
+  database.exec(fs.readFileSync(new URL("../migrations/0002_consumption_events.sql", import.meta.url), "utf8"));
   database.exec(`
     INSERT INTO ingredients (name, category, state) VALUES ('番茄', '蔬菜', 'none'), ('鸡蛋', '肉禽蛋', 'none');
     INSERT INTO recipes (title, method, minutes, status) VALUES ('番茄炒蛋', '炒', 15, 'formal');

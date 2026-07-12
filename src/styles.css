@@ -1209,6 +1209,180 @@ a:focus-visible {
   color: var(--green);
 }
 
+.cooking-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.96);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+}
+
+.cooking-footer .wide-primary {
+  width: min(100%, 696px);
+  min-height: 52px;
+  font-size: 16px;
+}
+
+.consumption-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(18, 25, 21, 0.45);
+  padding: 12px 12px max(12px, env(safe-area-inset-bottom));
+}
+
+.consumption-sheet {
+  width: min(100%, 560px);
+  max-height: min(90vh, 760px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 18px;
+  box-shadow: 0 18px 48px rgba(15, 24, 19, 0.2);
+}
+
+.consumption-sheet .sheet-header {
+  margin-bottom: 16px;
+}
+
+.consumption-sheet .sheet-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.consumption-list {
+  display: grid;
+  gap: 12px;
+}
+
+.consumption-row {
+  display: grid;
+  gap: 9px;
+  border-bottom: 1px solid #e7ebe9;
+  padding-bottom: 12px;
+}
+
+.consumption-row > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.consumption-row > div:first-child span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.consumption-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 4px;
+}
+
+.consumption-options button {
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #46504b;
+  padding: 4px 6px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.consumption-options button.active {
+  border-color: rgba(10, 148, 63, 0.35);
+  background: #fff;
+  color: var(--green-dark);
+  box-shadow: 0 1px 3px rgba(20, 31, 25, 0.1);
+}
+
+.consumption-options button.low.active {
+  border-color: #f2b58e;
+  color: #b84c12;
+}
+
+.consumption-options button.used_up.active {
+  border-color: #f0bcbc;
+  color: #b91f1f;
+}
+
+.consumption-options button:disabled {
+  opacity: 0.58;
+  cursor: progress;
+}
+
+.consumption-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.consumption-actions .primary-button,
+.consumption-actions .secondary-button {
+  width: 100%;
+}
+
+.undo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(82px + env(safe-area-inset-bottom));
+  z-index: 40;
+  width: min(calc(100% - 24px), 560px);
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  transform: translateX(-50%);
+  border: 1px solid #27342d;
+  border-radius: 8px;
+  background: #17211c;
+  color: #fff;
+  padding: 9px 10px 9px 14px;
+  box-shadow: 0 12px 30px rgba(11, 20, 15, 0.22);
+  font-size: 14px;
+}
+
+.undo-toast button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #8ce0af;
+  padding: 0 8px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.undo-toast button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.undo-toast .undo-toast-close {
+  width: 36px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  padding: 0;
+}
+
 .form-field input:focus {
   border-color: rgba(10, 148, 63, 0.55);
   box-shadow: 0 0 0 3px rgba(10, 148, 63, 0.12);
@@ -1913,5 +2087,9 @@ a:focus-visible {
 
   .mobile-main:not(.today-view) .draft-panel {
     grid-column: 1;
+  }
+
+  .undo-toast {
+    bottom: 24px;
   }
 }

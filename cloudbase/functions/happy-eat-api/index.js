@@ -1,5 +1,6 @@
 import cloudbase from "@cloudbase/node-sdk";
 import express from "express";
+import { randomUUID } from "node:crypto";
 
 const STATE_COLLECTION = "happy_eat_state";
 const STATE_DOCUMENT = "main";
@@ -145,6 +146,70 @@ app.post("/api/recipes/generate", route(async (req, res) => {
     draft.recipes.push(recipe);
   });
   res.json({ draft: publicRecipe(recipe), app: buildApp(state) });
+}));
+
+app.post("/api/recipes/:id/complete", route(async (req, res) => {
+  const consumptions = normalizeConsumptions(req.body?.consumptions);
+  let undoId = null;
+  const summary = { removed: 0, prioritized: 0 };
+  const state = await mutateState((draft) => {
+    const recipe = draft.recipes.find((item) => String(item.id) === req.params.id && item.status === "formal");
+    if (!recipe) throw httpError(404, "\u6b63\u5f0f\u83dc\u8c31\u4e0d\u5b58\u5728");
+    const requiredNames = new Set(recipe.ingredients.filter((item) => item.required).map((item) => item.name));
+    if (consumptions.some((item) => !requiredNames.has(item.name))) {
+      throw httpError(422, "\u6d88\u8017\u98df\u6750\u4e0d\u5728\u8fd9\u9053\u83dc\u7684\u5fc5\u9700\u6e05\u5355\u4e2d");
+    }
+
+    const changes = [];
+    for (const consumption of consumptions) {
+      if (consumption.action === "kept") continue;
+      const index = draft.ingredients.findIndex((item) => item.name === consumption.name);
+      if (index === -1) continue;
+      const ingredient = structuredClone(draft.ingredients[index]);
+      if (consumption.action === "used_up") {
+        draft.ingredients.splice(index, 1);
+        changes.push({ action: "used_up", before: ingredient });
+        summary.removed += 1;
+      } else if (ingredient.state !== "priority") {
+        draft.ingredients[index].state = "priority";
+        changes.push({ action: "low", before: ingredient });
+        summary.prioritized += 1;
+      }
+    }
+
+    if (changes.length > 0) {
+      undoId = randomUUID();
+      const events = Array.isArray(draft.consumptionEvents) ? draft.consumptionEvents : [];
+      events.push({ id: undoId, recipeId: recipe.id, changes, undone: false, createdAt: new Date().toISOString() });
+      draft.consumptionEvents = events.slice(-20);
+    }
+  });
+  res.json({ app: buildApp(state), undoId, summary });
+}));
+
+app.post("/api/consumption-events/:id/undo", route(async (req, res) => {
+  const state = await mutateState((draft) => {
+    const events = Array.isArray(draft.consumptionEvents) ? draft.consumptionEvents : [];
+    const event = events.find((item) => item.id === req.params.id);
+    if (!event) throw httpError(404, "\u64a4\u9500\u8bb0\u5f55\u4e0d\u5b58\u5728");
+    if (event.undone) throw httpError(409, "\u8fd9\u6b21\u5e93\u5b58\u53d8\u5316\u5df2\u7ecf\u64a4\u9500");
+
+    for (const change of event.changes) {
+      const ingredient = change.before;
+      if (change.action === "used_up") {
+        if (!draft.ingredients.some((item) => item.name === ingredient.name)) {
+          const restored = structuredClone(ingredient);
+          if (draft.ingredients.some((item) => item.id === restored.id)) restored.id = nextId(draft.ingredients);
+          draft.ingredients.push(restored);
+        }
+      } else {
+        const current = draft.ingredients.find((item) => item.name === ingredient.name);
+        if (current?.state === "priority") current.state = ingredient.state;
+      }
+    }
+    event.undone = true;
+  });
+  res.json({ app: buildApp(state), undone: true });
 }));
 
 app.patch("/api/drafts/:id", route(async (req, res) => {
@@ -354,6 +419,22 @@ function formatAvailableIngredients(ingredients) {
     const state = stateLabels[item.state];
     return `${item.name}${state ? `\uff08${state}\uff09` : ""}`;
   }).join("\u3001");
+}
+
+function normalizeConsumptions(value) {
+  if (!Array.isArray(value) || value.length > 100) {
+    throw httpError(422, "\u6d88\u8017\u98df\u6750\u683c\u5f0f\u65e0\u6548");
+  }
+  const seen = new Set();
+  return value.map((item) => {
+    const name = normalizeIngredientName(String(item?.name || ""));
+    const action = String(item?.action || "");
+    if (!name || !["used_up", "low", "kept"].includes(action) || seen.has(name)) {
+      throw httpError(422, "\u6d88\u8017\u98df\u6750\u683c\u5f0f\u65e0\u6548");
+    }
+    seen.add(name);
+    return { name, action };
+  });
 }
 
 async function generateRecipeWithLLM(sourceText) {
