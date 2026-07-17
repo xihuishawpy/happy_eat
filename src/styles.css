@@ -1,29 +1,54 @@
+/* Happy Eat — 家庭友好的界面样式
+   设计目标：温暖、柔和、有回应感。所有类名与 DOM 结构保持不变。 */
+
 :root {
   color-scheme: light;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
     "Noto Sans SC", sans-serif;
-  background: #f7f8f7;
-  color: #131816;
+  background: #f6f4ee;
+  color: #211d15;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --green: #0a943f;
-  --green-dark: #087333;
-  --green-soft: #e8f6ee;
-  --red: #e52d2d;
-  --orange: #f26b22;
+
+  --green: #0a7d3c;
+  --green-dark: #096631;
+  --green-soft: #e6f4ec;
+  --green-softer: #f0f8f3;
+  --red: #d92f2f;
+  --orange: #e8600f;
   --blue: #1268d6;
-  --ink: #131816;
-  --muted: #6c7370;
-  --line: #d9dfdc;
+  --ink: #211d15;
+  --muted: #76716a;
+  --line: #e6e1d5;
   --surface: #ffffff;
-  --surface-soft: #f2f5f3;
-  --shadow: 0 10px 26px rgba(33, 45, 38, 0.08);
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  --surface-soft: #f5f2ea;
+  --bg: #f6f4ee;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  --shadow-border: 0 0 0 1px rgba(33, 29, 21, 0.07);
+  --shadow-small: var(--shadow-border), 0 1px 2px rgba(33, 29, 21, 0.03), 0 4px 14px rgba(33, 29, 21, 0.05);
+  --shadow: var(--shadow-border), 0 12px 32px rgba(33, 29, 21, 0.1);
+  --shadow-lift: var(--shadow-border), 0 6px 20px rgba(33, 29, 21, 0.1);
+  --focus-ring: 0 0 0 2px #fff, 0 0 0 4px rgba(10, 125, 60, 0.55);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-med: 220ms;
 }
 
 * {
@@ -36,10 +61,24 @@ body,
   min-height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
-  background: #f4f6f5;
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(10, 125, 60, 0.05), transparent 60%),
+    var(--bg);
   color: var(--ink);
+  font-weight: 400;
+}
+
+h1,
+h2,
+h3,
+strong {
+  font-weight: 600;
 }
 
 button,
@@ -59,9 +98,15 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 a:focus-visible {
-  outline: 3px solid rgba(10, 148, 63, 0.2);
-  outline-offset: 2px;
+  outline: 0;
+  box-shadow: var(--focus-ring);
 }
+
+::selection {
+  background: rgba(10, 125, 60, 0.18);
+}
+
+/* ---------- 加载与访问页 ---------- */
 
 .loading,
 .access-page {
@@ -72,20 +117,39 @@ a:focus-visible {
 }
 
 .loading {
+  align-content: center;
+  gap: 14px;
   color: var(--muted);
   font-size: 15px;
+}
+
+.loading::before {
+  content: "";
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid var(--green-soft);
+  border-top-color: var(--green);
+  animation: sync-spin 0.9s linear infinite;
+}
+
+.loading:has(.loading-error)::before {
+  display: none;
 }
 
 .loading-error {
   width: min(100%, 360px);
   display: grid;
   gap: 10px;
-  border: 1px solid #ffd7d7;
-  border-radius: 8px;
+  justify-items: center;
+  border: 1px solid #f6d3d3;
+  border-radius: var(--radius-lg);
   background: #fff;
   color: var(--red);
-  padding: 16px;
+  padding: 22px 18px;
   text-align: center;
+  box-shadow: var(--shadow-small);
+  animation: view-enter var(--duration-med) var(--ease-out);
 }
 
 .loading-error span {
@@ -93,23 +157,31 @@ a:focus-visible {
   line-height: 1.45;
 }
 
+.access-page {
+  background:
+    radial-gradient(900px 480px at 50% -12%, rgba(10, 125, 60, 0.12), transparent 65%),
+    var(--bg);
+}
+
 .access-card {
   width: min(100%, 390px);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow);
-  padding: 22px;
+  padding: 26px 24px 24px;
+  animation: sheet-rise 320ms var(--ease-out);
 }
 
 .access-brand {
-  margin-bottom: 24px;
+  margin-bottom: 22px;
 }
 
 .access-card h1 {
   font-size: 24px;
   line-height: 1.22;
   margin: 0 0 8px;
+  letter-spacing: -0.01em;
 }
 
 .access-card p {
@@ -121,19 +193,22 @@ a:focus-visible {
 
 .access-card input {
   width: 100%;
-  height: 48px;
+  height: 50px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0 13px;
+  border-radius: var(--radius-md);
+  padding: 0 14px;
   margin-bottom: 14px;
   font-size: 16px;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
+
+/* ---------- 应用骨架与顶栏 ---------- */
 
 .app-shell {
   width: min(100%, 884px);
   min-height: 100vh;
   margin: 0 auto;
-  padding: 24px 10px calc(96px + env(safe-area-inset-bottom));
+  padding: 24px 12px calc(100px + env(safe-area-inset-bottom));
 }
 
 .skip-link {
@@ -148,7 +223,7 @@ a:focus-visible {
   padding: 9px 12px;
   min-height: 40px;
   text-decoration: none;
-  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .skip-link:focus {
@@ -160,7 +235,7 @@ a:focus-visible {
   grid-template-columns: 1fr auto auto;
   gap: 10px;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .brand {
@@ -169,15 +244,16 @@ a:focus-visible {
   align-items: center;
   gap: 10px;
   color: var(--green);
-  font-weight: 750;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .brand span {
-  color: #050707;
+  color: #14110b;
   font-size: 25px;
   line-height: 1;
   white-space: nowrap;
+  letter-spacing: -0.02em;
 }
 
 .sync-button,
@@ -195,11 +271,17 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
   background: var(--surface);
-  padding: 0 10px;
-  box-shadow: 0 2px 8px rgba(25, 37, 31, 0.04);
+  padding: 0 12px;
+  box-shadow: var(--shadow-small);
+  font-size: 14px;
+}
+
+.family-summary svg {
+  color: var(--green);
+  flex: 0 0 auto;
 }
 
 .family-summary span {
@@ -210,16 +292,20 @@ a:focus-visible {
 
 .family-meta {
   color: var(--muted);
+  font-size: 12px;
 }
 
 .sync-button {
-  min-height: 40px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 6px;
+  border-radius: var(--radius-md);
   color: var(--muted);
   font-size: 14px;
   white-space: nowrap;
+  padding: 0 8px;
+  transition: background-color var(--duration-fast);
 }
 
 .sync-button::after {
@@ -228,6 +314,7 @@ a:focus-visible {
   height: 7px;
   border-radius: 99px;
   background: var(--green);
+  transition: background-color var(--duration-fast);
 }
 
 .sync-button.syncing::after {
@@ -252,22 +339,40 @@ a:focus-visible {
   }
 }
 
+/* ---------- 页面切换与提示 ---------- */
+
 .mobile-main {
   display: grid;
-  gap: 14px;
+  gap: var(--space-4);
+}
+
+.mobile-main > section,
+.mobile-main > aside {
+  animation: view-enter 260ms var(--ease-out);
+}
+
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .panel {
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 5px 18px rgba(30, 42, 35, 0.05);
+  border: 0;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-small);
 }
 
 .ingredient-panel,
 .matches-panel,
 .draft-panel {
-  padding: 14px;
+  padding: 16px;
 }
 
 .section-title {
@@ -275,7 +380,7 @@ a:focus-visible {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .section-title.compact {
@@ -287,7 +392,7 @@ a:focus-visible {
   margin: 0;
   font-size: 22px;
   line-height: 1.2;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
   text-wrap: balance;
 }
 
@@ -304,16 +409,66 @@ a:focus-visible {
 
 .text-button {
   color: var(--green);
-  font-weight: 650;
+  font-weight: 500;
   font-size: 14px;
   min-width: 40px;
   min-height: 40px;
-  padding: 0 4px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--duration-fast);
 }
+
+/* ---------- 输入与按钮 ---------- */
 
 .input-wrap {
   position: relative;
   display: block;
+}
+
+.voice-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.voice-input-button {
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: #2f3834;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-border);
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out), background-color var(--duration-fast), color var(--duration-fast);
+}
+
+.voice-input-button.recording {
+  background: #fdeeee;
+  color: #b32626;
+  animation: recording-pulse 1.4s ease-out infinite;
+}
+
+@keyframes recording-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(210, 60, 60, 0.35);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(210, 60, 60, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(210, 60, 60, 0);
+  }
+}
+
+.voice-input-button .spin {
+  animation: sync-spin 0.8s linear infinite;
 }
 
 .input-wrap textarea,
@@ -321,20 +476,21 @@ a:focus-visible {
   width: 100%;
   resize: vertical;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #fff;
   color: var(--ink);
-  padding: 13px;
+  padding: 13px 14px;
   font-size: 16px;
   line-height: 1.45;
   outline: none;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .input-wrap textarea:focus,
 .draft-input:focus,
 .access-card input:focus {
-  border-color: rgba(10, 148, 63, 0.55);
-  box-shadow: 0 0 0 3px rgba(10, 148, 63, 0.12);
+  border-color: transparent;
+  box-shadow: var(--focus-ring);
 }
 
 .input-actions {
@@ -350,41 +506,47 @@ a:focus-visible {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px dashed #cfc9ba;
+  border-radius: 999px;
   background: var(--surface-soft);
-  color: #4f5754;
-  padding: 0 12px;
-  font-size: 14px;
+  color: #6b6558;
+  padding: 0 14px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
 .status-pill {
   min-height: 28px;
-  border-color: #d7e9ff;
+  border: 0;
   background: #eaf4ff;
   color: #2470c7;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .primary-button,
 .wide-primary {
-  min-height: 46px;
+  min-height: 48px;
   border: 0;
-  border-radius: 8px;
-  background: var(--green);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, #0d8a44, var(--green));
   color: #fff;
-  font-weight: 750;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 0 17px;
+  padding: 0 18px;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(10, 148, 63, 0.2);
-  transition-property: transform, background-color;
-  transition-duration: 120ms;
-  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 6px 16px rgba(10, 125, 60, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition: transform var(--duration-fast) var(--ease-out), background-color var(--duration-fast), box-shadow var(--duration-fast), filter var(--duration-fast);
+}
+
+.draft-voice-input {
+  margin-bottom: 10px;
+}
+
+.draft-voice-input .draft-input {
+  margin-bottom: 0;
 }
 
 .primary-button:active,
@@ -396,8 +558,18 @@ a:focus-visible {
 }
 
 .primary-button:disabled,
-.wide-primary:disabled,
+.wide-primary:disabled {
+  background: #edeee9;
+  color: #8b8d86;
+  box-shadow: var(--shadow-border);
+  opacity: 1;
+  cursor: progress;
+}
+
 .sync-button:disabled {
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
   opacity: 0.65;
   cursor: progress;
 }
@@ -406,6 +578,8 @@ a:focus-visible {
 .wide-primary {
   width: 100%;
 }
+
+/* ---------- 食材浏览 ---------- */
 
 .ingredient-browser {
   display: grid;
@@ -418,21 +592,23 @@ a:focus-visible {
   z-index: 6;
   display: grid;
   gap: 8px;
-  background: #f4f6f5;
-  padding: 3px 0 7px;
+  background: var(--bg);
+  padding: 3px 0 8px;
 }
 
 .search-field {
   min-width: 0;
-  min-height: 46px;
+  min-height: 48px;
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
   background: #fff;
   color: var(--muted);
-  padding: 0 12px;
+  padding: 0 14px;
+  box-shadow: var(--shadow-border);
+  transition: box-shadow var(--duration-fast);
 }
 
 .search-field input {
@@ -445,9 +621,12 @@ a:focus-visible {
   font-size: 16px;
 }
 
+.search-field input:focus-visible {
+  box-shadow: none;
+}
+
 .search-field:focus-within {
-  border-color: rgba(10, 148, 63, 0.55);
-  box-shadow: 0 0 0 3px rgba(10, 148, 63, 0.12);
+  box-shadow: var(--focus-ring);
 }
 
 .category-rail {
@@ -463,31 +642,35 @@ a:focus-visible {
 }
 
 .category-rail button {
-  height: 43px;
+  height: 42px;
   flex: 0 0 auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 999px;
   background: var(--surface);
-  color: #383f3c;
-  padding: 0 13px;
-  font-weight: 650;
+  color: #454038;
+  padding: 0 15px;
+  font-weight: 500;
   cursor: pointer;
+  box-shadow: var(--shadow-border);
+  transition: background-color var(--duration-fast), color var(--duration-fast), transform var(--duration-fast) var(--ease-out);
 }
 
 .category-rail button span {
   color: var(--muted);
   margin-left: 4px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .category-rail button.active {
   background: var(--green);
-  border-color: var(--green);
+  border-color: transparent;
   color: #fff;
+  box-shadow: 0 4px 12px rgba(10, 125, 60, 0.28);
 }
 
 .category-rail button.active span {
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .chips-grid {
@@ -499,29 +682,31 @@ a:focus-visible {
 .ingredient-chip,
 .add-chip {
   min-width: 0;
-  min-height: 52px;
+  min-height: 54px;
   display: grid;
   align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
   background: var(--surface);
+  box-shadow: var(--shadow-border);
 }
 
 .ingredient-fab {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));
-  bottom: calc(82px + env(safe-area-inset-bottom));
+  bottom: calc(84px + env(safe-area-inset-bottom));
   z-index: 9;
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
-  background: var(--green);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #0d8a44, var(--green));
   color: #fff;
-  box-shadow: 0 8px 22px rgba(10, 148, 63, 0.26);
+  box-shadow: 0 10px 24px rgba(10, 125, 60, 0.32);
   cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast);
 }
 
 .ingredient-chip {
@@ -529,12 +714,10 @@ a:focus-visible {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   color: var(--ink);
-  padding: 0 12px;
+  padding: 0 13px;
   text-align: left;
   cursor: pointer;
-  transition-property: transform, border-color, background-color;
-  transition-duration: 120ms;
-  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast), background-color var(--duration-fast);
 }
 
 .ingredient-summary {
@@ -544,7 +727,7 @@ a:focus-visible {
   align-content: center;
   justify-items: start;
   gap: 3px;
-  padding: 6px 0;
+  padding: 7px 0;
   overflow: hidden;
 }
 
@@ -553,12 +736,13 @@ a:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .ingredient-chip > svg {
   flex: 0 0 auto;
-  color: #7a837f;
+  color: #a09a8e;
+  transition: color var(--duration-fast);
 }
 
 .ingredient-chip:disabled,
@@ -571,63 +755,66 @@ a:focus-visible {
   grid-template-columns: auto auto;
   justify-content: center;
   gap: 8px;
-  border-style: dashed;
   color: #57605c;
-  font-weight: 650;
+  font-weight: 500;
   cursor: pointer;
-  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .state-tag {
   display: inline-flex;
-  min-height: 23px;
+  min-height: 22px;
   align-items: center;
-  border-radius: 6px;
-  padding: 0 6px;
+  border-radius: 999px;
+  padding: 0 8px;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .state-tag.priority {
-  background: #fff0e7;
+  background: #fdeede;
   color: var(--orange);
 }
 
 .state-tag.expiring {
-  background: #ffecec;
+  background: #fce8e8;
   color: var(--red);
 }
 
 .state-tag.frozen {
-  background: #eaf4ff;
+  background: #e7f2fd;
   color: var(--blue);
 }
+
+/* ---------- 菜谱匹配 ---------- */
 
 .match-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface-soft);
   padding: 4px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .match-tabs button,
 .source-tabs button {
   border: 0;
-  border-radius: 6px;
+  border-radius: 9px;
   background: transparent;
   min-height: 40px;
-  font-weight: 750;
-  color: #2f3633;
+  font-weight: 600;
+  color: #57524a;
   cursor: pointer;
+  transition: background-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .match-tabs button.active {
-  background: #e7f4ed;
+  background: #fff;
   color: var(--green);
+  box-shadow: 0 1px 4px rgba(33, 29, 21, 0.1);
 }
 
 .recipe-list {
@@ -638,20 +825,23 @@ a:focus-visible {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
-  padding: 14px 0;
-  border-bottom: 1px solid #e7ebe9;
+  padding: 14px 10px;
+  margin: 0 -10px;
+  border-bottom: 1px solid #eceadf;
+  border-radius: var(--radius-md);
   cursor: pointer;
   outline: none;
+  transition: background-color var(--duration-fast);
 }
 
 .recipe-row:last-child {
   border-bottom: 0;
-  padding-bottom: 2px;
+  padding-bottom: 4px;
 }
 
 .recipe-row:focus-visible {
-  border-radius: 8px;
-  box-shadow: 0 0 0 3px rgba(10, 148, 63, 0.16);
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 3px rgba(10, 125, 60, 0.18);
 }
 
 .recipe-title-line {
@@ -667,12 +857,13 @@ a:focus-visible {
   margin: 0;
   font-size: 17px;
   line-height: 1.25;
+  letter-spacing: -0.005em;
 }
 
 .recipe-meta {
   display: flex;
   gap: 12px;
-  color: #4e5753;
+  color: #6d675c;
   margin-top: 8px;
   font-size: 14px;
 }
@@ -683,30 +874,24 @@ a:focus-visible {
   gap: 4px;
 }
 
+.recipe-meta svg {
+  color: #9a948a;
+}
+
 .recipe-row p {
   margin: 8px 0 0;
-  color: #515a56;
+  color: #5b564c;
   font-size: 14px;
   line-height: 1.35;
 }
 
 .recipe-row .missing-line {
   color: var(--red);
+  font-weight: 500;
 }
 
 .recipe-row .substitution {
   color: var(--orange);
-}
-
-.sheet-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  align-items: flex-end;
-  background: rgba(19, 24, 22, 0.36);
-  padding: 16px 10px max(10px, env(safe-area-inset-bottom));
-  overscroll-behavior: contain;
 }
 
 .priority-note {
@@ -719,7 +904,7 @@ a:focus-visible {
 .recipe-filters {
   display: grid;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .filter-row {
@@ -740,17 +925,20 @@ a:focus-visible {
 .filter-row select,
 .form-field select {
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #fff;
   color: var(--ink);
   padding: 0 10px;
   font-size: 14px;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
+/* ---------- 今日侧栏 ---------- */
+
 .today-ingredient-entry {
-  padding: 13px 14px;
+  padding: 14px 16px;
 }
 
 .today-ingredient-entry .section-title {
@@ -763,46 +951,144 @@ a:focus-visible {
   gap: 10px;
   align-items: end;
   padding-top: 12px;
+  animation: view-enter 240ms var(--ease-out);
 }
 
-.recipe-sheet {
-  width: min(100%, 884px);
-  max-height: min(84vh, 720px);
-  margin: 0 auto;
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px 8px 0 0;
-  box-shadow: 0 -18px 40px rgba(22, 31, 27, 0.2);
-  padding: 10px 14px 18px;
+.draft-action {
+  z-index: 4;
+  display: grid;
+  gap: 10px;
 }
 
-.draft-editor-sheet {
-  width: min(100%, 720px);
-  max-height: min(92dvh, 840px);
+.today-sidebar {
+  display: contents;
+}
+
+.wide-primary {
+  min-height: 58px;
+  font-size: 17px;
+  letter-spacing: 0.01em;
+}
+
+.draft-action .secondary-button {
+  width: 100%;
+  min-height: 50px;
+}
+
+/* ---------- 底部弹层（Sheet） ---------- */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(26, 22, 15, 0.42);
+  padding: 16px 10px max(10px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+  animation: backdrop-fade 200ms ease-out;
+}
+
+@keyframes backdrop-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-rise {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.recipe-sheet,
+.draft-editor-sheet,
+.ingredient-sheet,
+.ingredient-selection-sheet {
   margin: 0 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 8px 8px 0 0;
-  box-shadow: 0 -18px 40px rgba(22, 31, 27, 0.2);
-  padding: 10px 14px calc(18px + env(safe-area-inset-bottom));
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: 0 -18px 44px rgba(26, 22, 15, 0.22);
+  padding: 10px 16px calc(18px + env(safe-area-inset-bottom));
+  animation: sheet-rise 300ms var(--ease-out);
+}
+
+.recipe-sheet {
+  width: min(100%, 884px);
+  max-height: min(84vh, 720px);
+}
+
+.draft-editor-sheet {
+  width: min(100%, 720px);
+  max-height: min(92dvh, 840px);
 }
 
 .ingredient-sheet,
 .ingredient-selection-sheet {
   width: min(100%, 560px);
   max-height: min(90dvh, 760px);
-  margin: 0 auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px 8px 0 0;
-  box-shadow: 0 -18px 40px rgba(22, 31, 27, 0.2);
-  padding: 10px 14px calc(18px + env(safe-area-inset-bottom));
 }
+
+.sheet-handle {
+  width: 42px;
+  height: 5px;
+  border-radius: 999px;
+  background: #d8d2c4;
+  margin: 2px auto 12px;
+}
+
+.sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #eceadf;
+}
+
+.sheet-header h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.24;
+  letter-spacing: -0.01em;
+}
+
+.sheet-header p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.close-button {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: #202825;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background-color var(--duration-fast), transform var(--duration-fast) var(--ease-out);
+}
+
+.close-button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* ---------- 食材选择弹层 ---------- */
 
 .ingredient-selection-content {
   display: grid;
@@ -819,7 +1105,7 @@ a:focus-visible {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .selection-chip-grid {
@@ -834,19 +1120,24 @@ a:focus-visible {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 999px;
   background: #fff;
   color: var(--ink);
-  padding: 0 11px;
+  padding: 0 14px;
   font-size: 14px;
   cursor: pointer;
+  transition: background-color var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast), transform var(--duration-fast) var(--ease-out);
+}
+
+.selection-chip:active {
+  transform: scale(0.96);
 }
 
 .selection-chip.selected {
-  border-color: rgba(10, 148, 63, 0.6);
-  background: #eaf8ef;
-  color: #087832;
-  font-weight: 700;
+  border-color: rgba(10, 125, 60, 0.5);
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-weight: 600;
 }
 
 .selection-chip small {
@@ -872,54 +1163,7 @@ a:focus-visible {
   justify-self: end;
 }
 
-.sheet-handle {
-  width: 44px;
-  height: 4px;
-  border-radius: 999px;
-  background: #cbd4d0;
-  margin: 0 auto 12px;
-}
-
-.sheet-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #e7ebe9;
-}
-
-.sheet-header h2 {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1.24;
-}
-
-.sheet-header p {
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
-  text-wrap: pretty;
-}
-
-.close-button {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fff;
-  color: #202825;
-  cursor: pointer;
-  flex: 0 0 auto;
-}
-
-.close-button:disabled {
-  opacity: 0.55;
-  cursor: progress;
-}
+/* ---------- 表单 ---------- */
 
 .ingredient-form {
   display: grid;
@@ -930,21 +1174,22 @@ a:focus-visible {
 .form-field {
   display: grid;
   gap: 7px;
-  color: #343c38;
+  color: #3a352c;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .form-field input {
   width: 100%;
-  min-height: 48px;
+  min-height: 50px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: #fff;
   color: var(--ink);
-  padding: 0 12px;
+  padding: 0 13px;
   font-size: 16px;
   outline: none;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .sr-only {
@@ -966,11 +1211,184 @@ a:focus-visible {
   display: grid;
   place-items: center;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #fff;
   color: #39413d;
   cursor: pointer;
+  transition: background-color var(--duration-fast), color var(--duration-fast);
 }
+
+.form-field input:focus {
+  border-color: rgba(10, 125, 60, 0.55);
+  box-shadow: 0 0 0 3px rgba(10, 125, 60, 0.12);
+}
+
+.option-field {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.option-field legend {
+  margin-bottom: 8px;
+  color: #3a352c;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.option-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.category-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.state-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.option-grid label {
+  position: relative;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.option-grid input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.option-grid label > span {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: #4c463c;
+  padding: 6px 8px;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  transition: background-color var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast);
+}
+
+.option-grid input:focus-visible + span {
+  outline: 3px solid rgba(10, 125, 60, 0.2);
+  outline-offset: 2px;
+}
+
+.option-grid label.selected > span {
+  border-color: rgba(10, 125, 60, 0.55);
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-weight: 600;
+}
+
+.state-options label.selected.priority > span {
+  border-color: #f0b287;
+  background: #fdeede;
+  color: #b84c12;
+}
+
+.state-options label.selected.expiring > span {
+  border-color: #efa9a9;
+  background: #fce8e8;
+  color: #b91f1f;
+}
+
+.state-options label.selected.frozen > span {
+  border-color: #a7c9f2;
+  background: #e7f2fd;
+  color: #1259ad;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.form-actions > button {
+  flex: 1 1 0;
+}
+
+.secondary-button,
+.danger-button {
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: #3f3a31;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-border);
+  transition: background-color var(--duration-fast), color var(--duration-fast), transform var(--duration-fast) var(--ease-out);
+}
+
+.secondary-button:active,
+.danger-button:active {
+  transform: scale(0.97);
+}
+
+.danger-button {
+  color: #b91f1f;
+  box-shadow: 0 0 0 1px #efd0d0;
+}
+
+.danger-button.solid {
+  background: #c62828;
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(198, 40, 40, 0.24);
+}
+
+.secondary-button:disabled,
+.danger-button:disabled {
+  opacity: 0.58;
+  cursor: progress;
+}
+
+.delete-confirmation {
+  border-top: 1px solid #f0d5d5;
+  padding-top: 14px;
+}
+
+.delete-confirmation p {
+  margin: 0 0 12px;
+  color: #8f1919;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.delete-confirmation > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.form-error,
+.sheet-error {
+  border-radius: var(--radius-md);
+  background: #fdf0f0;
+  color: #a71919;
+  padding: 10px 13px;
+  font-size: 14px;
+  line-height: 1.45;
+  animation: view-enter 200ms var(--ease-out);
+}
+
+/* ---------- 菜谱 / 草稿编辑器 ---------- */
 
 .draft-editor-form {
   display: grid;
@@ -1022,21 +1440,22 @@ a:focus-visible {
 .draft-ingredient-row input,
 .draft-step-row textarea {
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #fff;
   color: var(--ink);
   padding: 8px 10px;
   font-size: 16px;
   line-height: 1.4;
   outline: 0;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .draft-ingredient-row input:focus,
 .draft-step-row textarea:focus {
-  border-color: rgba(10, 148, 63, 0.55);
-  box-shadow: 0 0 0 3px rgba(10, 148, 63, 0.12);
+  border-color: rgba(10, 125, 60, 0.55);
+  box-shadow: 0 0 0 3px rgba(10, 125, 60, 0.12);
 }
 
 .required-toggle {
@@ -1044,7 +1463,7 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 5px;
-  color: #404844;
+  color: #45403a;
   font-size: 13px;
   white-space: nowrap;
 }
@@ -1066,8 +1485,9 @@ a:focus-visible {
 .draft-step-row > span {
   padding-top: 10px;
   color: var(--green);
-  font-weight: 750;
+  font-weight: 600;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .draft-step-row textarea {
@@ -1089,6 +1509,8 @@ a:focus-visible {
   grid-column: 1 / -1;
 }
 
+/* ---------- 菜谱详情 ---------- */
+
 .recipe-detail-error,
 .recipe-delete-confirmation {
   margin-top: 16px;
@@ -1105,13 +1527,69 @@ a:focus-visible {
   grid-column: 1 / -1;
 }
 
+.detail-warning,
+.detail-missing {
+  margin: 12px 0 0;
+  border-radius: var(--radius-md);
+  padding: 10px 13px;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.detail-warning {
+  background: #fdeede;
+  color: var(--orange);
+}
+
+.detail-missing {
+  background: #fce8e8;
+  color: var(--red);
+}
+
+.detail-block {
+  margin-top: 18px;
+}
+
+.detail-block h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.detail-block ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #403b32;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.step-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 28px;
+  color: #262219;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.step-list li::marker {
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* ---------- 烹饪模式 ---------- */
+
 .cooking-mode {
   position: fixed;
   inset: 0;
   z-index: 50;
   overflow-y: auto;
-  background: #f5f7f6;
+  background: var(--bg);
   color: var(--ink);
+  animation: backdrop-fade 180ms ease-out;
 }
 
 .cooking-header {
@@ -1124,7 +1602,9 @@ a:focus-visible {
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid var(--line);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   padding: max(10px, env(safe-area-inset-top)) 12px 10px;
 }
 
@@ -1136,19 +1616,23 @@ a:focus-visible {
 .cooking-header p {
   color: var(--green);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .cooking-header h2 {
   margin-top: 2px;
   font-size: 19px;
   line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 
 .cooking-header > span {
   color: var(--muted);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  background: var(--surface-soft);
+  border-radius: 999px;
+  padding: 4px 10px;
 }
 
 .cooking-content {
@@ -1170,16 +1654,23 @@ a:focus-visible {
 }
 
 .cooking-checklist label {
-  min-height: 54px;
+  min-height: 56px;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #fff;
-  padding: 9px 11px;
+  padding: 10px 12px;
   line-height: 1.45;
+  cursor: pointer;
+  transition: background-color var(--duration-fast), border-color var(--duration-fast);
+}
+
+.cooking-checklist label:has(input:checked) {
+  background: var(--green-softer);
+  border-color: rgba(10, 125, 60, 0.3);
 }
 
 .cooking-checklist input {
@@ -1191,6 +1682,11 @@ a:focus-visible {
 .cooking-checklist input:checked + span {
   color: var(--muted);
   text-decoration: line-through;
+  text-decoration-color: rgba(10, 125, 60, 0.45);
+}
+
+.cooking-checklist span {
+  transition: color var(--duration-fast);
 }
 
 .cooking-steps label {
@@ -1216,7 +1712,9 @@ a:focus-visible {
   display: grid;
   place-items: center;
   border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
 }
 
@@ -1226,6 +1724,8 @@ a:focus-visible {
   font-size: 16px;
 }
 
+/* ---------- 消耗确认 ---------- */
+
 .consumption-backdrop {
   position: fixed;
   inset: 0;
@@ -1233,8 +1733,9 @@ a:focus-visible {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(18, 25, 21, 0.45);
+  background: rgba(26, 22, 15, 0.45);
   padding: 12px 12px max(12px, env(safe-area-inset-bottom));
+  animation: backdrop-fade 180ms ease-out;
 }
 
 .consumption-sheet {
@@ -1242,10 +1743,11 @@ a:focus-visible {
   max-height: min(90vh, 760px);
   overflow-y: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: #fff;
   padding: 18px;
-  box-shadow: 0 18px 48px rgba(15, 24, 19, 0.2);
+  box-shadow: 0 18px 48px rgba(26, 22, 15, 0.24);
+  animation: sheet-rise 280ms var(--ease-out);
 }
 
 .consumption-sheet .sheet-header {
@@ -1266,7 +1768,7 @@ a:focus-visible {
 .consumption-row {
   display: grid;
   gap: 9px;
-  border-bottom: 1px solid #e7ebe9;
+  border-bottom: 1px solid #eceadf;
   padding-bottom: 12px;
 }
 
@@ -1286,7 +1788,7 @@ a:focus-visible {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface-soft);
   padding: 4px;
 }
@@ -1295,29 +1797,30 @@ a:focus-visible {
   min-width: 0;
   min-height: 40px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 9px;
   background: transparent;
-  color: #46504b;
+  color: #4c463c;
   padding: 4px 6px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
 }
 
 .consumption-options button.active {
-  border-color: rgba(10, 148, 63, 0.35);
+  border-color: rgba(10, 125, 60, 0.35);
   background: #fff;
   color: var(--green-dark);
-  box-shadow: 0 1px 3px rgba(20, 31, 25, 0.1);
+  box-shadow: 0 1px 3px rgba(33, 29, 21, 0.1);
 }
 
 .consumption-options button.low.active {
-  border-color: #f2b58e;
+  border-color: #f0b287;
   color: #b84c12;
 }
 
 .consumption-options button.used_up.active {
-  border-color: #f0bcbc;
+  border-color: #efa9a9;
   color: #b91f1f;
 }
 
@@ -1338,10 +1841,12 @@ a:focus-visible {
   width: 100%;
 }
 
+/* ---------- 撤销 Toast ---------- */
+
 .undo-toast {
   position: fixed;
   left: 50%;
-  bottom: calc(82px + env(safe-area-inset-bottom));
+  bottom: calc(84px + env(safe-area-inset-bottom));
   z-index: 40;
   width: min(calc(100% - 24px), 560px);
   min-height: 52px;
@@ -1350,24 +1855,37 @@ a:focus-visible {
   align-items: center;
   gap: 10px;
   transform: translateX(-50%);
-  border: 1px solid #27342d;
-  border-radius: 8px;
-  background: #17211c;
+  border: 1px solid #2a332c;
+  border-radius: var(--radius-lg);
+  background: #1b241e;
   color: #fff;
-  padding: 9px 10px 9px 14px;
-  box-shadow: 0 12px 30px rgba(11, 20, 15, 0.22);
+  padding: 9px 10px 9px 16px;
+  box-shadow: 0 14px 34px rgba(11, 20, 15, 0.28);
   font-size: 14px;
+  animation: toast-rise 280ms var(--ease-out);
+}
+
+@keyframes toast-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .undo-toast button {
-  min-height: 36px;
+  min-height: 38px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: #8ce0af;
-  padding: 0 8px;
-  font-weight: 750;
+  padding: 0 10px;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color var(--duration-fast);
 }
 
 .undo-toast button:disabled {
@@ -1376,244 +1894,14 @@ a:focus-visible {
 }
 
 .undo-toast .undo-toast-close {
-  width: 36px;
+  width: 38px;
   display: grid;
   place-items: center;
   color: #fff;
   padding: 0;
 }
 
-.form-field input:focus {
-  border-color: rgba(10, 148, 63, 0.55);
-  box-shadow: 0 0 0 3px rgba(10, 148, 63, 0.12);
-}
-
-.option-field {
-  min-width: 0;
-  margin: 0;
-  border: 0;
-  padding: 0;
-}
-
-.option-field legend {
-  margin-bottom: 8px;
-  color: #343c38;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.option-grid {
-  display: grid;
-  gap: 8px;
-}
-
-.category-options {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.state-options {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.option-grid label {
-  position: relative;
-  min-width: 0;
-  cursor: pointer;
-}
-
-.option-grid input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-
-.option-grid label > span {
-  min-height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: #454d49;
-  padding: 6px 8px;
-  font-size: 14px;
-  font-weight: 650;
-  text-align: center;
-}
-
-.option-grid input:focus-visible + span {
-  outline: 3px solid rgba(10, 148, 63, 0.2);
-  outline-offset: 2px;
-}
-
-.option-grid label.selected > span {
-  border-color: rgba(10, 148, 63, 0.55);
-  background: var(--green-soft);
-  color: var(--green-dark);
-}
-
-.state-options label.selected.priority > span {
-  border-color: #f2b58e;
-  background: #fff0e7;
-  color: #b84c12;
-}
-
-.state-options label.selected.expiring > span {
-  border-color: #f2aaaa;
-  background: #ffecec;
-  color: #b91f1f;
-}
-
-.state-options label.selected.frozen > span {
-  border-color: #a7c9f2;
-  background: #eaf4ff;
-  color: #1259ad;
-}
-
-.form-actions {
-  display: flex;
-  gap: 10px;
-  padding-top: 2px;
-}
-
-.form-actions > button {
-  flex: 1 1 0;
-}
-
-.secondary-button,
-.danger-button {
-  min-height: 46px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: #fff;
-  color: #3b433f;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 0 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.danger-button {
-  border-color: #f0bcbc;
-  color: #b91f1f;
-}
-
-.danger-button.solid {
-  border-color: #c62828;
-  background: #c62828;
-  color: #fff;
-}
-
-.secondary-button:disabled,
-.danger-button:disabled {
-  opacity: 0.58;
-  cursor: progress;
-}
-
-.delete-confirmation {
-  border-top: 1px solid #f0cece;
-  padding-top: 14px;
-}
-
-.delete-confirmation p {
-  margin: 0 0 12px;
-  color: #8f1919;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.delete-confirmation > div {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.form-error {
-  border-radius: var(--radius-lg);
-  background: #fff0f0;
-  color: #a71919;
-  padding: 10px 12px;
-  font-size: 14px;
-  line-height: 1.45;
-}
-
-.detail-warning,
-.detail-missing {
-  margin: 12px 0 0;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 14px;
-  line-height: 1.4;
-  font-weight: 650;
-}
-
-.detail-warning {
-  background: #fff0e7;
-  color: var(--orange);
-}
-
-.detail-missing {
-  background: #ffecec;
-  color: var(--red);
-}
-
-.detail-block {
-  margin-top: 16px;
-}
-
-.detail-block h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
-  line-height: 1.25;
-}
-
-.detail-block ul {
-  margin: 0;
-  padding-left: 20px;
-  color: #3d4541;
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.step-list {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding-left: 28px;
-  color: #222a27;
-  font-size: 15px;
-  line-height: 1.55;
-}
-
-.step-list li::marker {
-  color: var(--green);
-  font-weight: 750;
-}
-
-.draft-action {
-  z-index: 4;
-  display: grid;
-  gap: 10px;
-}
-
-.today-sidebar {
-  display: contents;
-}
-
-.wide-primary {
-  min-height: 58px;
-  font-size: 18px;
-}
-
-.draft-action .secondary-button {
-  width: 100%;
-  min-height: 50px;
-}
+/* ---------- 草稿 / 导入 ---------- */
 
 .draft-panel {
   scroll-margin-bottom: 110px;
@@ -1623,17 +1911,18 @@ a:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .source-tabs button {
   border-radius: 0;
-  min-height: 43px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
   border-bottom: 2px solid transparent;
+  transition: color var(--duration-fast), border-color var(--duration-fast);
 }
 
 .source-tabs button.active {
@@ -1655,17 +1944,18 @@ a:focus-visible {
 }
 
 .image-upload label {
-  min-height: 46px;
+  min-height: 48px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px dashed #bac5c0;
-  border-radius: 8px;
-  background: #fbfcfb;
+  border: 1.5px dashed #b9b2a1;
+  border-radius: var(--radius-md);
+  background: #fbfaf6;
   color: #2f3834;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
+  transition: border-color var(--duration-fast), background-color var(--duration-fast);
 }
 
 .image-upload input {
@@ -1681,21 +1971,22 @@ a:focus-visible {
   max-height: 220px;
   object-fit: contain;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #fff;
 }
 
 .draft-list {
   display: grid;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 .draft-card {
-  border: 1px solid #e4e9e6;
-  border-radius: 8px;
-  padding: 12px;
-  background: #fbfcfb;
+  border: 1px solid #e9e4d8;
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  background: #fbfaf6;
+  transition: box-shadow var(--duration-fast), transform var(--duration-fast) var(--ease-out);
 }
 
 .draft-header {
@@ -1730,20 +2021,20 @@ a:focus-visible {
 }
 
 .mini-chips span {
-  min-height: 33px;
+  min-height: 32px;
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 999px;
   background: #fff;
-  padding: 0 10px;
+  padding: 0 11px;
   font-size: 13px;
 }
 
 .draft-columns ol {
   margin: 0;
   padding-left: 20px;
-  color: #3d4541;
+  color: #403b32;
   font-size: 13px;
   line-height: 1.55;
 }
@@ -1753,24 +2044,43 @@ a:focus-visible {
   min-height: 52px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  border: 1.5px dashed #d8d2c2;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.55);
   color: var(--muted);
+  padding: 18px 14px;
   font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
 }
+
+.chips-grid .empty {
+  grid-column: 1 / -1;
+}
+
+.recipe-list .empty,
+.matches-panel > .empty {
+  margin-top: 4px;
+}
+
+/* ---------- 全局提示 ---------- */
 
 .notice {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border: 1px solid #ffd7d7;
-  background: #fff2f2;
+  border: 1px solid #f2cfcf;
+  background: #fdf0f0;
   color: #b11212;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   margin-bottom: 12px;
   font-size: 14px;
   line-height: 1.4;
+  animation: view-enter 220ms var(--ease-out);
 }
 
 .notice button {
@@ -1779,8 +2089,11 @@ a:focus-visible {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
+  transition: background-color var(--duration-fast);
 }
+
+/* ---------- 底部导航 ---------- */
 
 .bottom-nav {
   position: fixed;
@@ -1791,7 +2104,9 @@ a:focus-visible {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid var(--line);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   padding: 8px max(8px, env(safe-area-inset-left)) calc(7px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-right));
 }
 
@@ -1799,7 +2114,7 @@ a:focus-visible {
   min-width: 0;
   border: 0;
   background: transparent;
-  color: #181f1c;
+  color: #57524a;
   display: grid;
   justify-items: center;
   gap: 3px;
@@ -1808,23 +2123,33 @@ a:focus-visible {
   cursor: pointer;
   min-height: 52px;
   padding: 4px 2px;
-  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1);
+  border-radius: var(--radius-md);
+  transition: transform var(--duration-fast) var(--ease-out), color var(--duration-fast);
 }
 
 .bottom-nav button.active {
   color: var(--green);
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .nav-icon-wrap {
   position: relative;
-  height: 27px;
+  height: 28px;
+  min-width: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  transition: background-color var(--duration-med) var(--ease-out);
+}
+
+.bottom-nav button.active .nav-icon-wrap {
+  background: var(--green-soft);
 }
 
 .badge {
   position: absolute;
-  right: -9px;
-  top: -6px;
+  right: -2px;
+  top: -4px;
   min-width: 18px;
   height: 18px;
   border-radius: 99px;
@@ -1833,8 +2158,11 @@ a:focus-visible {
   display: grid;
   place-items: center;
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px #fff;
 }
+
+/* ---------- 小屏适配 ---------- */
 
 @media (max-width: 560px) {
   .app-shell {
@@ -1848,13 +2176,13 @@ a:focus-visible {
 
   .sync-button {
     min-height: 40px;
-    padding: 0 2px;
+    padding: 0 4px;
   }
 
   .family-summary {
     max-width: 118px;
     height: 40px;
-    padding: 0 8px;
+    padding: 0 10px;
   }
 
   .family-meta {
@@ -1953,33 +2281,148 @@ a:focus-visible {
   }
 }
 
+/* ---------- 悬停（仅支持悬停的设备） ---------- */
+
 @media (hover: hover) {
   .primary-button:hover,
   .wide-primary:hover {
-    background: var(--green-dark);
+    filter: brightness(0.94);
+    box-shadow: 0 8px 20px rgba(10, 125, 60, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    transform: translateY(-1px);
+  }
+
+  .secondary-button:hover,
+  .icon-button:hover,
+  .close-button:hover {
+    background: var(--surface-soft);
+  }
+
+  .danger-button:hover {
+    background: #fdf0f0;
+  }
+
+  .text-button:hover {
+    background: var(--green-soft);
+  }
+
+  .sync-button:hover {
+    background: rgba(33, 29, 21, 0.05);
   }
 
   .ingredient-chip:hover,
   .add-chip:hover {
-    border-color: #aeb9b4;
-    background: #fbfcfb;
+    background: #fbfaf5;
+    box-shadow: var(--shadow-lift);
+    transform: translateY(-1px);
+  }
+
+  .ingredient-chip:hover > svg {
+    color: var(--green);
+  }
+
+  .ingredient-fab:hover {
+    transform: translateY(-2px) scale(1.04);
+    box-shadow: 0 14px 30px rgba(10, 125, 60, 0.38);
+  }
+
+  .category-rail button:hover {
+    transform: translateY(-1px);
+  }
+
+  .recipe-row:hover {
+    background: #faf8f2;
+  }
+
+  .draft-card:hover {
+    box-shadow: var(--shadow-lift);
+  }
+
+  .selection-chip:hover {
+    border-color: #b9b2a1;
+  }
+
+  .image-upload label:hover {
+    border-color: var(--green);
+    background: var(--green-softer);
+  }
+
+  .notice button:hover,
+  .undo-toast button:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .notice button:hover {
+    background: rgba(177, 18, 18, 0.08);
+  }
+
+  .bottom-nav button:hover {
+    color: var(--green);
   }
 }
 
+/* ---------- 减少动态效果 ---------- */
+
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   .skip-link,
   .primary-button,
   .wide-primary,
   .ingredient-chip,
   .add-chip,
-  .bottom-nav button {
+  .bottom-nav button,
+  .category-rail button,
+  .ingredient-fab,
+  .selection-chip,
+  .voice-input-button,
+  .secondary-button,
+  .danger-button,
+  .close-button,
+  .icon-button,
+  .text-button,
+  .match-tabs button,
+  .source-tabs button,
+  .consumption-options button,
+  .recipe-row,
+  .cooking-checklist label,
+  .option-grid label > span {
     transition: none;
   }
 
-  .sync-button.syncing svg {
+  .mobile-main > section,
+  .mobile-main > aside,
+  .sheet-backdrop,
+  .recipe-sheet,
+  .draft-editor-sheet,
+  .ingredient-sheet,
+  .ingredient-selection-sheet,
+  .consumption-backdrop,
+  .consumption-sheet,
+  .cooking-mode,
+  .undo-toast,
+  .notice,
+  .form-error,
+  .sheet-error,
+  .loading-error,
+  .access-card,
+  .today-ingredient-form {
+    animation: none;
+  }
+
+  .sync-button.syncing svg,
+  .loading::before,
+  .voice-input-button .spin {
+    animation: none;
+  }
+
+  .voice-input-button.recording {
     animation: none;
   }
 }
+
+/* ---------- 平板 / 桌面 ---------- */
 
 @media (min-width: 700px) {
   .app-shell {
@@ -2019,7 +2462,7 @@ a:focus-visible {
     width: min(100%, 884px);
     border: 1px solid var(--line);
     border-bottom: 0;
-    border-radius: 8px 8px 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   }
 }
 
@@ -2033,6 +2476,8 @@ a:focus-visible {
 
   .topbar {
     order: 1;
+    min-height: 64px;
+    margin-bottom: 0;
   }
 
   .notice {
@@ -2047,11 +2492,14 @@ a:focus-visible {
     bottom: auto;
     transform: none;
     width: 100%;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 6px;
+    border: 0;
+    border-radius: 0;
+    padding: 0 0 8px;
     margin-bottom: 18px;
-    background: var(--surface);
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 1px 0 rgba(33, 29, 21, 0.1);
   }
 
   .bottom-nav button {
@@ -2060,19 +2508,29 @@ a:focus-visible {
     justify-content: center;
     gap: 8px;
     min-height: 46px;
-    border-radius: 6px;
+    border-radius: 999px;
     padding: 6px 12px;
     font-size: 14px;
   }
 
   .bottom-nav button.active {
-    background: #e7f4ed;
+    background: var(--green-soft);
+  }
+
+  .bottom-nav button.active .nav-icon-wrap {
+    background: transparent;
   }
 
   .nav-icon-wrap {
-    height: 25px;
+    height: 26px;
+    min-width: 26px;
     display: grid;
     place-items: center;
+  }
+
+  .badge {
+    right: -8px;
+    top: -5px;
   }
 
   .mobile-main {
@@ -2087,6 +2545,18 @@ a:focus-visible {
 
   .mobile-main:not(.today-view) .draft-panel {
     grid-column: 1;
+  }
+
+  .recipe-sheet,
+  .draft-editor-sheet,
+  .ingredient-sheet,
+  .ingredient-selection-sheet {
+    border-radius: var(--radius-xl);
+  }
+
+  .sheet-backdrop {
+    align-items: center;
+    padding: 24px;
   }
 
   .undo-toast {

@@ -11,13 +11,23 @@ const root = path.resolve(__dirname, "..");
 
 loadDotEnv(path.join(root, ".env"));
 
-const port = Number(process.env.PORT || 5173);
+function readCliFlag(name) {
+  const prefix = `--${name}=`;
+  const inline = process.argv.find((arg) => arg.startsWith(prefix));
+  if (inline) return inline.slice(prefix.length);
+  const index = process.argv.indexOf(`--${name}`);
+  return index !== -1 ? process.argv[index + 1] : undefined;
+}
+
+const port = Number(readCliFlag("port") || process.env.PORT || 5173);
+const host = readCliFlag("host") || process.env.HOST;
 const accessCode = process.env.FAMILY_ACCESS_CODE || "happy-eat";
 const databasePath = path.resolve(root, process.env.DATABASE_PATH || "data/happy-eat.sqlite");
 const dashScopeApiKey = process.env.DASHSCOPE_API_KEY || "";
 const dashScopeBaseUrl = process.env.DASHSCOPE_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const dashScopeTextModel = process.env.DASHSCOPE_TEXT_MODEL || "qwen-plus";
 const dashScopeVisionModel = process.env.DASHSCOPE_VISION_MODEL || "qwen3-vl-plus";
+const dashScopeAsrModel = process.env.DASHSCOPE_ASR_MODEL || "qwen3-asr-flash";
 const llmConfigured = Boolean(dashScopeApiKey);
 const pantry = ["盐", "白糖", "生抽", "老抽", "食用油", "香醋", "料酒"];
 
@@ -421,7 +431,7 @@ if (process.env.NODE_ENV === "production") {
   app.use(vite.middlewares);
 }
 
-app.listen(port, () => {
+app.listen(port, host, () => {
   console.log(`Happy Eat running at http://localhost:${port}`);
   if (!process.env.FAMILY_ACCESS_CODE) {
     console.log("Using development family access code: happy-eat");
