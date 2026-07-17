@@ -319,6 +319,53 @@ test("LLM can generate a recipe draft from available ingredients", async () => {
   }
 });
 
+test("voice recording is transcribed with qwen3-asr-flash", async () => {
+  let requestBody;
+  const asr = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({
+        choices: [{ message: { content: "鸡蛋、番茄、冷冻虾仁" } }],
+      }));
+    });
+  });
+  asr.listen(0, "127.0.0.1");
+  await once(asr, "listening");
+
+  const server = await startTestServer({
+    env: {
+      DASHSCOPE_API_KEY: "test-key",
+      DASHSCOPE_BASE_URL: `http://127.0.0.1:${asr.address().port}`,
+    },
+  });
+
+  try {
+    const audioDataUrl = "data:audio/wav;base64,UklGRg==";
+    const result = await api(server, "/api/audio/transcriptions", {
+      method: "POST",
+      body: { audioDataUrl },
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.payload.text, "鸡蛋、番茄、冷冻虾仁");
+    assert.equal(requestBody.model, "qwen3-asr-flash");
+    assert.equal(requestBody.messages[0].content[0].type, "input_audio");
+    assert.equal(requestBody.messages[0].content[0].input_audio.data, audioDataUrl);
+
+    const invalid = await api(server, "/api/audio/transcriptions", {
+      method: "POST",
+      body: { audioDataUrl: "data:text/plain;base64,SGVsbG8=" },
+    });
+    assert.equal(invalid.response.status, 422);
+  } finally {
+    await server.stop();
+    asr.close();
+    await once(asr, "close");
+  }
+});
+
 test("正式菜谱 can be edited and deleted", async () => {
   const server = await startTestServer();
 

@@ -8,6 +8,8 @@ import {
   Clock3,
   FileText,
   Image,
+  LoaderCircle,
+  Mic,
   Pencil,
   Play,
   Plus,
@@ -15,12 +17,13 @@ import {
   Save,
   Search,
   Sparkles,
+  Square,
   Trash2,
   Users,
   Utensils,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const tabs = [
   { id: "today", label: "今天做什么", shortLabel: "今天", icon: Utensils },
@@ -93,6 +96,12 @@ export default function App() {
         setSyncState("error");
       });
   }, [token]);
+
+  useEffect(() => {
+    if (app && app.matches.ready.length === 0 && app.matches.missing.length > 0) {
+      setMatchTab("missing");
+    }
+  }, [app]);
 
   if (!token) {
     return <AccessGate onUnlock={(nextToken, nextApp) => {
@@ -462,14 +471,22 @@ export default function App() {
               <button className="text-button" type="button" onClick={() => setBatchText("")}>清空</button>
             </div>
 
-            <label className="input-wrap">
-              <textarea
-                value={batchText}
-                onChange={(event) => setBatchText(event.target.value)}
-                placeholder="家里还有什么食材？"
-                rows={2}
+            <div className="voice-input-row">
+              <label className="input-wrap">
+                <textarea
+                  value={batchText}
+                  onChange={(event) => setBatchText(event.target.value)}
+                  placeholder="家里还有什么食材？"
+                  rows={2}
+                />
+              </label>
+              <VoiceInputButton
+                token={token}
+                disabled={busy}
+                onTranscript={(text) => setBatchText((current) => appendTranscript(current, text))}
+                onError={setError}
               />
-            </label>
+            </div>
 
             <div className="input-actions">
               <span className="example-chip">示例：鸡蛋、番茄、牛肉</span>
@@ -602,15 +619,23 @@ export default function App() {
               </div>
               {showTodayIngredientInput && (
                 <div className="today-ingredient-form">
-                  <label className="input-wrap">
-                    <textarea
-                      value={batchText}
-                      onChange={(event) => setBatchText(event.target.value)}
-                      placeholder="例如：鸡蛋、番茄、冷冻虾仁"
-                      rows={2}
-                      autoFocus
+                  <div className="voice-input-row">
+                    <label className="input-wrap">
+                      <textarea
+                        value={batchText}
+                        onChange={(event) => setBatchText(event.target.value)}
+                        placeholder="例如：鸡蛋、番茄、冷冻虾仁"
+                        rows={2}
+                        autoFocus
+                      />
+                    </label>
+                    <VoiceInputButton
+                      token={token}
+                      disabled={busy}
+                      onTranscript={(text) => setBatchText((current) => appendTranscript(current, text))}
+                      onError={setError}
                     />
-                  </label>
+                  </div>
                   <button className="primary-button" type="button" onClick={addBatchIngredients} disabled={busy || !batchText.trim()}>
                     <Sparkles size={18} />
                     {pendingAction === "batch" ? "正在添加" : "解析并添加"}
@@ -677,13 +702,29 @@ export default function App() {
                   placeholder="可选：补充图片来源或备注"
                 />
               </div>
+            ) : draftSource === "text" ? (
+              <div className="voice-input-row draft-voice-input">
+                <textarea
+                  className="draft-input"
+                  value={draftText}
+                  onChange={(event) => setDraftText(event.target.value)}
+                  rows={4}
+                  placeholder="粘贴或说出菜谱文本"
+                />
+                <VoiceInputButton
+                  token={token}
+                  disabled={busy}
+                  onTranscript={(text) => setDraftText((current) => appendTranscript(current, text))}
+                  onError={setError}
+                />
+              </div>
             ) : (
               <textarea
                 className="draft-input"
                 value={draftText}
                 onChange={(event) => setDraftText(event.target.value)}
-                rows={draftSource === "web" ? 2 : 4}
-                placeholder={draftSource === "web" ? "粘贴菜谱网页链接" : "粘贴菜谱文本"}
+                rows={2}
+                placeholder="粘贴菜谱网页链接"
               />
             )}
 
@@ -1707,6 +1748,147 @@ function normalizeSearchTerm(value) {
 
 function findRecipeById(matches, recipeId) {
   return [...matches.ready, ...matches.missing].find((recipe) => recipe.id === recipeId);
+}
+
+function VoiceInputButton({ token, disabled, onTranscript, onError }) {
+  const [status, setStatus] = useState("idle");
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    clearTimeout(timerRef.current);
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+
+  async function startRecording() {
+    onError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
+        .find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recorderRef.current = recorder;
+      streamRef.current = stream;
+      chunksRef.current = [];
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      });
+      recorder.addEventListener("stop", transcribeRecording, { once: true });
+      recorder.start();
+      setStatus("recording");
+      timerRef.current = setTimeout(() => recorder.state === "recording" && recorder.stop(), 60_000);
+    } catch (error) {
+      setStatus("idle");
+      onError(error.name === "NotAllowedError" ? "请允许使用麦克风后再试" : "无法开始录音，请检查浏览器麦克风权限");
+    }
+  }
+
+  function stopRecording() {
+    clearTimeout(timerRef.current);
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  }
+
+  async function transcribeRecording() {
+    clearTimeout(timerRef.current);
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    if (!mountedRef.current) return;
+    setStatus("transcribing");
+    try {
+      const recorded = new Blob(chunksRef.current, { type: recorderRef.current?.mimeType || "audio/webm" });
+      if (!recorded.size) throw new Error("没有录到声音，请重试");
+      const audio = await normalizeRecordedAudio(recorded);
+      const audioDataUrl = await readFileAsDataUrl(audio);
+      const result = await api("/api/audio/transcriptions", {
+        token,
+        method: "POST",
+        body: { audioDataUrl },
+      });
+      if (!result.text.trim()) throw new Error("没有识别到文字，请重试");
+      onTranscript(result.text.trim());
+    } catch (error) {
+      onError(error.message || "语音识别失败，请重试");
+    } finally {
+      recorderRef.current = null;
+      streamRef.current = null;
+      chunksRef.current = [];
+      setStatus("idle");
+    }
+  }
+
+  const recording = status === "recording";
+  const label = recording ? "停止录音" : status === "transcribing" ? "正在识别语音" : "语音转文字";
+  return (
+    <button
+      className={`voice-input-button${recording ? " recording" : ""}`}
+      type="button"
+      onClick={recording ? stopRecording : startRecording}
+      disabled={disabled || status === "transcribing"}
+      aria-pressed={recording}
+      aria-label={label}
+      title={label}
+    >
+      {recording
+        ? <Square size={18} fill="currentColor" />
+        : status === "transcribing"
+          ? <LoaderCircle className="spin" size={20} />
+          : <Mic size={21} />}
+    </button>
+  );
+}
+
+function appendTranscript(current, transcript) {
+  const text = current.trim();
+  return text ? `${text}\n${transcript}` : transcript;
+}
+
+async function normalizeRecordedAudio(blob) {
+  if (/^audio\/(webm|ogg|mpeg|mp3|wav|x-wav|flac|aac|aiff)/i.test(blob.type)) {
+    return new Blob([blob], { type: blob.type.split(";")[0] });
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) throw new Error("当前浏览器不支持录音格式转换");
+  const context = new AudioContextClass();
+  try {
+    const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+    return encodeWav(buffer);
+  } finally {
+    await context.close();
+  }
+}
+
+function encodeWav(audioBuffer) {
+  const samples = audioBuffer.getChannelData(0);
+  const data = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(data);
+  const writeText = (offset, text) => [...text].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
+  writeText(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeText(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, audioBuffer.sampleRate, true);
+  view.setUint32(28, audioBuffer.sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeText(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  samples.forEach((sample, index) => {
+    const value = Math.max(-1, Math.min(1, sample));
+    view.setInt16(44 + index * 2, value < 0 ? value * 0x8000 : value * 0x7fff, true);
+  });
+  return new Blob([data], { type: "audio/wav" });
 }
 
 async function api(url, options = {}) {

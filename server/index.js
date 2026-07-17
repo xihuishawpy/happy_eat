@@ -86,7 +86,7 @@ db.exec(`
 seedDatabase();
 
 const app = express();
-app.use(express.json({ limit: "12mb" }));
+app.use(express.json({ limit: "14mb" }));
 
 app.post("/api/session", (req, res) => {
   if (req.body?.accessCode !== accessCode) {
@@ -115,6 +115,20 @@ app.use("/api", (req, res, next) => {
 
 app.get("/api/app", (req, res) => {
   res.json(readAppState());
+});
+
+app.post("/api/audio/transcriptions", async (req, res) => {
+  if (!dashScopeApiKey) return res.status(503).json({ error: "语音识别尚未配置" });
+  const audioDataUrl = String(req.body?.audioDataUrl || "");
+  const match = audioDataUrl.match(/^data:(audio\/[\w.+-]+);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match || !/^audio\/(webm|ogg|mpeg|mp3|wav|x-wav|flac|aac|aiff)$/i.test(match[1])) {
+    return res.status(422).json({ error: "录音格式不受支持" });
+  }
+  if (Buffer.byteLength(match[2], "base64") > 10 * 1024 * 1024) {
+    return res.status(413).json({ error: "录音不能超过 10MB" });
+  }
+
+  res.json({ text: await transcribeAudio(audioDataUrl) });
 });
 
 app.post("/api/ingredients", (req, res) => {
@@ -921,6 +935,31 @@ async function callDashScopeJson({ model, messages }) {
   } catch {
     throw new Error("千问返回内容不是可解析的 JSON");
   }
+}
+
+async function transcribeAudio(audioDataUrl) {
+  const response = await fetch(`${dashScopeBaseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${dashScopeApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: dashScopeAsrModel,
+      messages: [{
+        role: "user",
+        content: [{ type: "input_audio", input_audio: { data: audioDataUrl } }],
+      }],
+      stream: false,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(formatDashScopeError(payload.error?.message));
+    error.status = 502;
+    throw error;
+  }
+  return readAssistantContent(payload).trim();
 }
 
 function readAssistantContent(payload) {

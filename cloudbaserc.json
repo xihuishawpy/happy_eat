@@ -14,6 +14,8 @@
       "envVariables": {
         "CLOUDBASE_ENV_ID": "shaw-d2gpfh5e6ce1c4c87",
         "FAMILY_ACCESS_CODE": "{{env.FAMILY_ACCESS_CODE}}",
+        "DASHSCOPE_API_KEY": "{{env.DASHSCOPE_API_KEY}}",
+        "DASHSCOPE_ASR_MODEL": "qwen3-asr-flash",
         "CLOUDBASE_TEXT_MODEL": "deepseek-v4-flash",
         "CLOUDBASE_VISION_MODEL": "qwen3.5-plus"
       }

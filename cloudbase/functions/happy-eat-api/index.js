@@ -11,7 +11,7 @@ const database = cloudbaseApp.database();
 const aiModel = cloudbaseApp.ai().createModel("cloudbase");
 
 app.set("trust proxy", true);
-app.use(express.json({ limit: "12mb" }));
+app.use(express.json({ limit: "14mb" }));
 
 app.post("/api/session", route(async (req, res) => {
   const clientKey = String(req.headers["x-forwarded-for"] || req.ip || "unknown").split(",")[0].trim();
@@ -47,6 +47,19 @@ app.use("/api", (req, res, next) => {
 
 app.get("/api/app", route(async (_req, res) => {
   res.json(buildApp(await readState()));
+}));
+
+app.post("/api/audio/transcriptions", route(async (req, res) => {
+  if (!process.env.DASHSCOPE_API_KEY) throw httpError(503, "语音识别尚未配置");
+  const audioDataUrl = String(req.body?.audioDataUrl || "");
+  const match = audioDataUrl.match(/^data:(audio\/[\w.+-]+);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match || !/^audio\/(webm|ogg|mpeg|mp3|wav|x-wav|flac|aac|aiff)$/i.test(match[1])) {
+    throw httpError(422, "录音格式不受支持");
+  }
+  if (Buffer.byteLength(match[2], "base64") > 10 * 1024 * 1024) {
+    throw httpError(413, "录音不能超过 10MB");
+  }
+  res.json({ text: await transcribeAudio(audioDataUrl) });
 }));
 
 app.post("/api/ingredients", route(async (req, res) => {
@@ -533,6 +546,37 @@ async function callCloudBaseJson({ model, messages }) {
   const end = text.lastIndexOf("}");
   if (start === -1 || end <= start) throw new Error("AI 返回内容不是可解析的 JSON");
   return JSON.parse(text.slice(start, end + 1));
+}
+
+async function transcribeAudio(audioDataUrl) {
+  const baseUrl = process.env.DASHSCOPE_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.DASHSCOPE_ASR_MODEL || "qwen3-asr-flash",
+      messages: [{
+        role: "user",
+        content: [{ type: "input_audio", input_audio: { data: audioDataUrl } }],
+      }],
+      stream: false,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw httpError(502, formatDashScopeError(payload.error?.message));
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) return content.map((part) => part?.text || "").join("\n").trim();
+  return "";
+}
+
+function formatDashScopeError(message) {
+  const text = String(message || "");
+  if (/api key/i.test(text)) return "DashScope API Key 无效或无权限，请更换有效 Key 后重试";
+  return text || "语音识别服务调用失败";
 }
 
 function sanitizeIngredients(items, includeQuantity = false) {

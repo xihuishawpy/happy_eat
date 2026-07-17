@@ -48,6 +48,7 @@ jobs:
       - name: Deploy API function
         env:
           FAMILY_ACCESS_CODE: ${{ secrets.FAMILY_ACCESS_CODE }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: tcb fn deploy happy-eat-api --force --httpFn --deployMode cos --json
 
       - name: Deploy frontend
