@@ -1,0 +1,42 @@
+#!/bin/sh
+# Enforce keeping docs/feature-test-checklist.md in sync when core functional code changes.
+# Bypass for pure behavior-preserving refactors: SKIP_CHECKLIST=1 git commit ...
+
+set -eu
+
+if [ "${SKIP_CHECKLIST:-0}" = "1" ]; then
+  exit 0
+fi
+
+CHECKLIST="docs/feature-test-checklist.md"
+STAGED_FILES="$(git diff --cached --name-only --diff-filter=ACMRD)"
+
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+# Functional files that normally impact user-facing behavior or API contracts.
+# Pure CSS (src/styles.css), tests, and docs are intentionally excluded.
+FUNCTIONAL_FILES="$(printf '%s\n' "$STAGED_FILES" | grep -E '^(src/.*\.(js|jsx|ts|tsx)|server/|netlify/functions/|worker/|cloudbase/functions/|migrations/)' | grep -v -E '^src/main\.(js|jsx|ts|tsx)$' || true)"
+
+if [ -z "$FUNCTIONAL_FILES" ]; then
+  exit 0
+fi
+
+if printf '%s\n' "$STAGED_FILES" | grep -Fxq "$CHECKLIST"; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+
+[pre-commit] 检测到核心功能代码改动，但未同步更新 $CHECKLIST：
+$(printf '%s\n' "$FUNCTIONAL_FILES" | sed 's/^/  - /')
+
+请先更新 $CHECKLIST 中对应模块的功能/测试条目，并执行：
+  git add $CHECKLIST
+
+如果本次仅为不影响功能与交互的纯重构，可显式跳过检查：
+  SKIP_CHECKLIST=1 git commit ...
+
+EOF
+exit 1
