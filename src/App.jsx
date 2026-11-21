@@ -217,6 +217,7 @@ export default function App() {
     );
   }
 
+  const kitchenName = app.family.name === "张家" ? "小张张的幸福厨房" : `${app.family.name}厨房`;
   const allRecipes = [...app.matches.ready, ...app.matches.missing];
   const recipeMethods = [...new Set(allRecipes.map((recipe) => recipe.method))];
   const urgentIngredients = app.ingredients
@@ -630,7 +631,7 @@ export default function App() {
               <header className="page-header">
                 <div>
                   <p className="header-sub">
-                    {getWeekdayGreeting()} 👋 {app.family.name}厨房
+                    {getWeekdayGreeting()} 👋 {kitchenName}
                   </p>
                   <h1 className="header-title">{getMealQuestion()}</h1>
                 </div>
@@ -638,8 +639,8 @@ export default function App() {
                   className={`family-avatar-btn sync-${syncState}`}
                   type="button"
                   onClick={() => setActiveTab("family")}
-                  aria-label={`进入${app.family.name}家庭空间`}
-                  title={`${app.family.name}厨房 · ${syncState === "syncing" ? "同步中" : syncState === "error" ? "同步异常" : "已同步"}`}
+                  aria-label={`进入${kitchenName}的家庭空间`}
+                  title={`${kitchenName} · ${syncState === "syncing" ? "同步中" : syncState === "error" ? "同步异常" : "已同步"}`}
                 >
                   <span aria-hidden="true">🏠</span>
                   <span className="sync-dot" aria-hidden="true" />
@@ -1292,6 +1293,7 @@ export default function App() {
           {activeTab === "family" && (
             <FamilySpaceTab
               app={app}
+              kitchenName={kitchenName}
               totalRecipes={allRecipes.length}
               allRecipes={allRecipes}
               syncState={syncState}
@@ -2877,7 +2879,7 @@ function playGentleChime() {
    FAMILY SPACE TAB
    ============================================================ */
 
-function FamilySpaceTab({ app, totalRecipes, allRecipes, syncState, busy, onRefresh, onOpenCreate, onSignOut }) {
+function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState, busy, onRefresh, onOpenCreate, onSignOut }) {
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const preferenceTags = [...new Set(allRecipes.map((r) => r.preferenceWarning).filter(Boolean))];
 
@@ -2886,7 +2888,7 @@ function FamilySpaceTab({ app, totalRecipes, allRecipes, syncState, busy, onRefr
       <header className="page-header">
         <div>
           <h1 className="header-title">家庭</h1>
-          <p className="header-sub">{app.family.name}厨房 · 共享家庭空间</p>
+          <p className="header-sub">{kitchenName} · 共享家庭空间</p>
         </div>
       </header>
 
@@ -2895,7 +2897,7 @@ function FamilySpaceTab({ app, totalRecipes, allRecipes, syncState, busy, onRefr
         <div className="family-hero-top">
           <div className="family-big-avatar" aria-hidden="true">🏠</div>
           <div>
-            <h2>{app.family.name}厨房</h2>
+            <h2>{kitchenName}</h2>
             <p>{app.family.accessMode}共享 · 全家同步</p>
           </div>
         </div>
