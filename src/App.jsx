@@ -880,7 +880,7 @@ export default function App() {
                       rows={editingBatchText ? 2 : 1}
                       value={batchText}
                       onChange={(event) => handleBatchTextChange(event.target.value)}
-                      placeholder="说出或输入新添食材，如：牛肉、胡萝卜、番茄快过期"
+                      placeholder="说出或输入新添食材…"
                       aria-label="自然语言录入食材"
                       disabled={busy}
                       autoFocus={editingBatchText}
