@@ -5,4 +5,5 @@ data/*.sqlite-*
 .env
 .dev.vars
 .wrangler/
+.netlify/
 .DS_Store
