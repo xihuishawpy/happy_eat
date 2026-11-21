@@ -4,9 +4,12 @@ import {
   ChefHat,
   Check,
   ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Clock3,
   FileText,
+  Flame,
+  Globe,
   Image,
   LoaderCircle,
   Mic,
@@ -49,6 +52,25 @@ const stateLabels = {
 };
 
 const cookingMethods = ["炒", "煮", "蒸", "煎", "烤", "凉拌", "炖", "其他"];
+
+const methodTones = {
+  炒: "warm",
+  煎: "warm",
+  烤: "warm",
+  炖: "amber",
+  煮: "amber",
+  蒸: "sage",
+  凉拌: "sage",
+  其他: "neutral",
+};
+
+const draftSourceLabels = {
+  generated: "AI 生成",
+  text: "文本导入",
+  web: "网页导入",
+  image: "图片导入",
+  manual: "手动草稿",
+};
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem("familyAccessToken") || "");
@@ -104,10 +126,14 @@ export default function App() {
   }, [app]);
 
   if (!token) {
-    return <AccessGate onUnlock={(nextToken, nextApp) => {
-      setToken(nextToken);
-      setApp(nextApp);
-    }} />;
+    return (
+      <AccessGate
+        onUnlock={(nextToken, nextApp) => {
+          setToken(nextToken);
+          setApp(nextApp);
+        }}
+      />
+    );
   }
 
   if (!app) {
@@ -117,9 +143,13 @@ export default function App() {
           <div className="loading-error" role="alert">
             <strong>家庭空间暂时无法打开</strong>
             <span>{error}</span>
-            <button className="secondary-button" type="button" onClick={() => window.location.reload()}>重试</button>
+            <button className="secondary-button" type="button" onClick={() => window.location.reload()}>
+              重试
+            </button>
           </div>
-        ) : "正在打开家庭空间..."}
+        ) : (
+          "正在打开家庭空间..."
+        )}
       </div>
     );
   }
@@ -130,6 +160,9 @@ export default function App() {
   const recipeMethods = [...new Set([...app.matches.ready, ...app.matches.missing].map((recipe) => recipe.method))];
   const readyCount = filteredReady.length;
   const missingCount = filteredMissing.length;
+  const urgentIngredients = app.ingredients.filter((item) => item.state === "expiring" || item.state === "priority");
+  const availableNames = new Set([...app.ingredients.map((item) => item.name), ...(app.pantry || [])]);
+  const hasActiveRecipeFilters = Boolean(recipeQuery || recipeMethod || recipeTime);
 
   async function refresh() {
     setPendingAction("refresh");
@@ -152,11 +185,13 @@ export default function App() {
     setSyncState("syncing");
     setError("");
     try {
-      setApp(await api("/api/ingredients/batch", {
-        token,
-        method: "POST",
-        body: { text: batchText },
-      }));
+      setApp(
+        await api("/api/ingredients/batch", {
+          token,
+          method: "POST",
+          body: { text: batchText },
+        }),
+      );
       setBatchText("");
       setShowTodayIngredientInput(false);
       setSyncState("synced");
@@ -189,15 +224,17 @@ export default function App() {
     setSyncState("syncing");
     setError("");
     try {
-      setApp(await api(editing ? `/api/ingredients/${ingredient.id}` : "/api/ingredients", {
-        token,
-        method: editing ? "PATCH" : "POST",
-        body: {
-          name: ingredient.name,
-          category: ingredient.category,
-          state: ingredient.state,
-        },
-      }));
+      setApp(
+        await api(editing ? `/api/ingredients/${ingredient.id}` : "/api/ingredients", {
+          token,
+          method: editing ? "PATCH" : "POST",
+          body: {
+            name: ingredient.name,
+            category: ingredient.category,
+            state: ingredient.state,
+          },
+        }),
+      );
       setSelectedCategory("全部");
       setIngredientEditor(null);
       setSyncState("synced");
@@ -214,10 +251,12 @@ export default function App() {
     setSyncState("syncing");
     setError("");
     try {
-      setApp(await api(`/api/ingredients/${id}`, {
-        token,
-        method: "DELETE",
-      }));
+      setApp(
+        await api(`/api/ingredients/${id}`, {
+          token,
+          method: "DELETE",
+        }),
+      );
       setSelectedCategory("全部");
       setIngredientEditor(null);
       setSyncState("synced");
@@ -237,12 +276,12 @@ export default function App() {
       const result = await api("/api/drafts/analyze", {
         token,
         method: "POST",
-          body: {
-            sourceType: draftSource,
-            content: draftText,
-            imageDataUrl: draftImageDataUrl,
-          },
-        });
+        body: {
+          sourceType: draftSource,
+          content: draftText,
+          imageDataUrl: draftImageDataUrl,
+        },
+      });
       setApp(result.app);
       setActiveTab("drafts");
       setSyncState("synced");
@@ -421,20 +460,26 @@ export default function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">跳到主要内容</a>
+
       <header className="topbar">
         <div className="brand">
-          <ChefHat size={31} aria-hidden="true" />
-          <span>Happy Eat</span>
+          <span className="brand-mark" aria-hidden="true">
+            <ChefHat size={20} strokeWidth={2.2} />
+          </span>
+          <span className="brand-name">Happy Eat</span>
         </div>
-        <div className="family-summary" aria-label={`家庭空间：${app.family.name}`}>
-          <Users size={17} />
-          <span>{app.family.name}</span>
-          <span className="family-meta">单家庭</span>
+
+        <div className="topbar-meta">
+          <div className="family-summary" aria-label={`家庭空间：${app.family.name}`}>
+            <Users size={14} aria-hidden="true" />
+            <span>{app.family.name}</span>
+            <span className="family-meta">厨房</span>
+          </div>
+          <button className={`sync-button ${syncState}`} type="button" onClick={refresh} disabled={busy}>
+            <RefreshCcw size={14} aria-hidden="true" />
+            <span>{syncState === "syncing" ? "同步中" : syncState === "error" ? "同步失败" : "已同步"}</span>
+          </button>
         </div>
-        <button className={`sync-button ${syncState}`} type="button" onClick={refresh} disabled={busy}>
-          <RefreshCcw size={18} />
-          <span>{syncState === "syncing" ? "同步中" : syncState === "error" ? "同步失败" : "已同步"}</span>
-        </button>
       </header>
 
       {error && !ingredientEditor && (
@@ -466,9 +511,13 @@ export default function App() {
             <div className="section-title">
               <div>
                 <h1 id="ingredient-title">更新可用食材清单</h1>
-                <p>自然语言录入，系统归一并分类</p>
+                <p>自然语言批量录入，自动归一并分类</p>
               </div>
-              <button className="text-button" type="button" onClick={() => setBatchText("")}>清空</button>
+              {batchText && (
+                <button className="text-button" type="button" onClick={() => setBatchText("")}>
+                  清空
+                </button>
+              )}
             </div>
 
             <div className="voice-input-row">
@@ -476,7 +525,7 @@ export default function App() {
                 <textarea
                   value={batchText}
                   onChange={(event) => setBatchText(event.target.value)}
-                  placeholder="家里还有什么食材？"
+                  placeholder="家里还有什么食材？例如：番茄快过期、鸡蛋、冷冻虾仁"
                   rows={2}
                 />
               </label>
@@ -489,9 +538,16 @@ export default function App() {
             </div>
 
             <div className="input-actions">
-              <span className="example-chip">示例：鸡蛋、番茄、牛肉</span>
+              <button
+                className="example-chip"
+                type="button"
+                onClick={() => setBatchText("鸡蛋、番茄快过期、牛肉")}
+                disabled={busy}
+              >
+                示例：鸡蛋、番茄、牛肉
+              </button>
               <button className="primary-button" type="button" onClick={addBatchIngredients} disabled={busy}>
-                <Sparkles size={18} />
+                <Sparkles size={17} />
                 {pendingAction === "batch" ? "正在添加" : "解析并添加"}
               </button>
             </div>
@@ -502,14 +558,24 @@ export default function App() {
           <section className="ingredient-browser" aria-label="食材分类">
             <div className="ingredient-tools">
               <label className="search-field">
-                <Search size={18} aria-hidden="true" />
+                <Search size={17} aria-hidden="true" />
                 <input
                   type="search"
                   value={ingredientQuery}
                   onChange={(event) => setIngredientQuery(event.target.value)}
-                  placeholder="搜索食材"
+                  placeholder="搜索食材（支持别名，如西红柿）"
                   aria-label="搜索食材"
                 />
+                {ingredientQuery && (
+                  <button
+                    className="search-clear"
+                    type="button"
+                    onClick={() => setIngredientQuery("")}
+                    aria-label="清空搜索"
+                  >
+                    <X size={15} />
+                  </button>
+                )}
               </label>
               <CategoryRail
                 categories={app.categories}
@@ -523,41 +589,105 @@ export default function App() {
                 <IngredientChip
                   key={ingredient.id}
                   ingredient={ingredient}
+                  showCategory={selectedCategory === "全部"}
                   onEdit={() => openIngredient(ingredient)}
                   disabled={busy}
                 />
               ))}
-              {visibleIngredients.length === 0 && <div className="empty">没有找到食材。</div>}
+              {visibleIngredients.length === 0 && (
+                <div className="empty">
+                  <span>没有找到匹配的食材</span>
+                </div>
+              )}
             </div>
             <button className="ingredient-fab" type="button" onClick={openNewIngredient} aria-label="添加食材">
-              <Plus size={22} />
+              <Plus size={24} strokeWidth={2.4} />
             </button>
           </section>
         )}
 
         {(activeTab === "today" || activeTab === "recipes") && (
           <section className="panel matches-panel" aria-label="菜谱匹配">
+            {activeTab === "today" && (
+              <div className="today-hero">
+                <div className="today-hero-top">
+                  <div>
+                    <span className="today-greeting">{getKitchenGreeting()}</span>
+                    <h1>今天做什么？</h1>
+                  </div>
+                  <div className="today-metrics" aria-label="今日厨房概览">
+                    <div className="metric-pill ready">
+                      <strong>{app.matches.ready.length}</strong>
+                      <span>可立刻做</span>
+                    </div>
+                    <div className="metric-pill inventory">
+                      <strong>{app.ingredients.length}</strong>
+                      <span>可用食材</span>
+                    </div>
+                  </div>
+                </div>
+
+                {urgentIngredients.length > 0 && (
+                  <div className="urgent-strip" aria-label="优先消耗食材">
+                    <span className="urgent-label">
+                      <Flame size={13} aria-hidden="true" />
+                      优先用掉
+                    </span>
+                    <div className="urgent-tags">
+                      {urgentIngredients.slice(0, 5).map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`urgent-chip ${item.state}`}
+                          onClick={() => openIngredient(item)}
+                        >
+                          {item.name}
+                        </button>
+                      ))}
+                      {urgentIngredients.length > 5 && (
+                        <span className="urgent-more">+{urgentIngredients.length - 5}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === "recipes" && (
               <div className="recipe-filters" aria-label="菜谱筛选">
                 <label className="search-field recipe-search">
-                  <Search size={18} aria-hidden="true" />
+                  <Search size={17} aria-hidden="true" />
                   <input
                     type="search"
                     value={recipeQuery}
                     onChange={(event) => setRecipeQuery(event.target.value)}
-                    placeholder="搜索菜谱或食材"
+                    placeholder="搜索菜谱名或食材"
                     aria-label="搜索菜谱或食材"
                   />
+                  {recipeQuery && (
+                    <button
+                      className="search-clear"
+                      type="button"
+                      onClick={() => setRecipeQuery("")}
+                      aria-label="清空菜谱搜索"
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
                 </label>
                 <div className="filter-row">
-                  <label>
+                  <label className={recipeMethod ? "filter-select active" : "filter-select"}>
                     <span>烹饪方式</span>
                     <select value={recipeMethod} onChange={(event) => setRecipeMethod(event.target.value)}>
                       <option value="">全部</option>
-                      {recipeMethods.map((method) => <option key={method} value={method}>{method}</option>)}
+                      {recipeMethods.map((method) => (
+                        <option key={method} value={method}>
+                          {method}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <label>
+                  <label className={recipeTime ? "filter-select active" : "filter-select"}>
                     <span>烹饪时间</span>
                     <select value={recipeTime} onChange={(event) => setRecipeTime(event.target.value)}>
                       <option value="">全部</option>
@@ -566,12 +696,15 @@ export default function App() {
                       <option value="long">30 分钟以上</option>
                     </select>
                   </label>
-                  {(recipeQuery || recipeMethod || recipeTime) && (
-                    <button className="text-button" type="button" onClick={clearRecipeFilters}>清除</button>
+                  {hasActiveRecipeFilters && (
+                    <button className="text-button filter-clear" type="button" onClick={clearRecipeFilters}>
+                      清除
+                    </button>
                   )}
                 </div>
               </div>
             )}
+
             <div className="match-tabs" role="tablist" aria-label="菜谱匹配结果">
               <button
                 className={matchTab === "ready" ? "active" : ""}
@@ -592,15 +725,22 @@ export default function App() {
                 待补食材（{missingCount}）
               </button>
             </div>
+
             {[...filteredReady, ...filteredMissing].some((recipe) => recipe.usesPriority) && (
-              <p className="priority-note">当前结果包含会用到优先处理食材的菜谱。</p>
+              <p className="priority-note">
+                <Flame size={14} aria-hidden="true" />
+                <span>已优先排序会消耗快过期或优先处理食材的菜谱</span>
+              </p>
             )}
+
             <RecipeList
               recipes={matchTab === "ready" ? filteredReady : filteredMissing}
               onOpen={setSelectedRecipe}
-              emptyMessage={matchTab === "ready"
-                ? "当前还没有可做菜谱，补充食材后会自动更新。"
-                : "目前没有待补食材菜谱。"}
+              emptyMessage={
+                matchTab === "ready"
+                  ? "当前还没有可做菜谱，补充食材后会自动更新。"
+                  : "目前没有待补食材菜谱。"
+              }
             />
           </section>
         )}
@@ -611,9 +751,13 @@ export default function App() {
               <div className="section-title compact">
                 <div>
                   <h2 id="today-ingredient-title">家里食材有变化？</h2>
-                  <p>更新后可做菜谱会立即重排。</p>
+                  <p>随手录入新买的菜，可做菜谱立即重排</p>
                 </div>
-                <button className="text-button" type="button" onClick={() => setShowTodayIngredientInput((current) => !current)}>
+                <button
+                  className={showTodayIngredientInput ? "pill-toggle active" : "pill-toggle"}
+                  type="button"
+                  onClick={() => setShowTodayIngredientInput((current) => !current)}
+                >
                   {showTodayIngredientInput ? "收起" : "更新食材"}
                 </button>
               </div>
@@ -636,8 +780,13 @@ export default function App() {
                       onError={setError}
                     />
                   </div>
-                  <button className="primary-button" type="button" onClick={addBatchIngredients} disabled={busy || !batchText.trim()}>
-                    <Sparkles size={18} />
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={addBatchIngredients}
+                    disabled={busy || !batchText.trim()}
+                  >
+                    <Sparkles size={17} />
                     {pendingAction === "batch" ? "正在添加" : "解析并添加"}
                   </button>
                 </div>
@@ -646,7 +795,7 @@ export default function App() {
 
             <section className="draft-action">
               <button
-                className="wide-primary"
+                className="wide-primary ai-cta"
                 type="button"
                 onClick={() => {
                   setError("");
@@ -654,11 +803,11 @@ export default function App() {
                 }}
                 disabled={busy || !app.ai.configured || app.ingredients.length === 0}
               >
-                <Sparkles size={22} />
+                <Sparkles size={20} />
                 {pendingAction === "recipe-generate" ? "正在生成菜谱" : "AI 生成菜谱"}
               </button>
-              <button className="secondary-button" type="button" onClick={() => setActiveTab("drafts")} disabled={busy}>
-                <Plus size={24} />
+              <button className="secondary-button import-cta" type="button" onClick={() => setActiveTab("drafts")} disabled={busy}>
+                <Plus size={19} />
                 导入菜谱
               </button>
             </section>
@@ -670,20 +819,50 @@ export default function App() {
             <div className="section-title compact">
               <div>
                 <h2 id="draft-title">导入菜谱</h2>
-                <p>解析后先检查草稿，确认后才进入菜谱库。</p>
+                <p>解析后先生成草稿，检查确认后才进入菜谱库</p>
               </div>
             </div>
 
             <div className="source-tabs" role="tablist" aria-label="导入来源">
-              <button className={draftSource === "text" ? "active" : ""} type="button" role="tab" aria-selected={draftSource === "text"} onClick={() => setDraftSource("text")}>文本</button>
-              <button className={draftSource === "image" ? "active" : ""} type="button" role="tab" aria-selected={draftSource === "image"} onClick={() => setDraftSource("image")}>
-                <Image size={16} />图片
+              <button
+                className={draftSource === "text" ? "active" : ""}
+                type="button"
+                role="tab"
+                aria-selected={draftSource === "text"}
+                onClick={() => setDraftSource("text")}
+              >
+                <FileText size={15} aria-hidden="true" />
+                文本
               </button>
-              <button className={draftSource === "web" ? "active" : ""} type="button" role="tab" aria-selected={draftSource === "web"} onClick={() => setDraftSource("web")}>网页链接</button>
+              <button
+                className={draftSource === "image" ? "active" : ""}
+                type="button"
+                role="tab"
+                aria-selected={draftSource === "image"}
+                onClick={() => setDraftSource("image")}
+              >
+                <Image size={15} aria-hidden="true" />
+                图片
+              </button>
+              <button
+                className={draftSource === "web" ? "active" : ""}
+                type="button"
+                role="tab"
+                aria-selected={draftSource === "web"}
+                onClick={() => setDraftSource("web")}
+              >
+                <Globe size={15} aria-hidden="true" />
+                网页链接
+              </button>
             </div>
 
             {draftSource === "image" ? (
               <div className="image-upload">
+                {app.ai.configured && !app.ai.visionModel && (
+                  <p className="subtle-hint">
+                    当前使用纯文本模型（{app.ai.textModel}），建议优先用「文本」或「网页链接」导入。
+                  </p>
+                )}
                 <label>
                   <Image size={18} />
                   <span>{draftImageDataUrl ? "更换菜谱图片" : "选择菜谱图片"}</span>
@@ -709,7 +888,7 @@ export default function App() {
                   value={draftText}
                   onChange={(event) => setDraftText(event.target.value)}
                   rows={4}
-                  placeholder="粘贴或说出菜谱文本"
+                  placeholder="粘贴或说出菜谱做法（例如小红书/下厨房菜谱正文）"
                 />
                 <VoiceInputButton
                   token={token}
@@ -724,7 +903,7 @@ export default function App() {
                 value={draftText}
                 onChange={(event) => setDraftText(event.target.value)}
                 rows={2}
-                placeholder="粘贴菜谱网页链接"
+                placeholder="粘贴可公开访问的菜谱网页链接（https://...）"
               />
             )}
 
@@ -733,14 +912,9 @@ export default function App() {
               {pendingAction === "draft-analyze" ? "正在解析" : "解析为草稿"}
             </button>
 
-            <DraftList
-              drafts={app.drafts}
-              onEdit={setDraftEditor}
-              disabled={busy}
-            />
+            <DraftList drafts={app.drafts} onEdit={setDraftEditor} disabled={busy} />
           </section>
         )}
-
       </main>
 
       <nav className="bottom-nav" aria-label="主导航">
@@ -757,10 +931,10 @@ export default function App() {
               onClick={() => setActiveTab(tab.id)}
             >
               <span className="nav-icon-wrap">
-                <Icon size={25} />
+                <Icon size={21} strokeWidth={activeTab === tab.id ? 2.2 : 1.9} />
                 {count > 0 && <span className="badge">{count}</span>}
               </span>
-              {tab.shortLabel || tab.label}
+              <span className="nav-label">{tab.shortLabel || tab.label}</span>
             </button>
           );
         })}
@@ -769,6 +943,7 @@ export default function App() {
       {selectedRecipe && (
         <RecipeDetailSheet
           recipe={selectedRecipe}
+          availableNames={availableNames}
           busy={busy}
           deleting={pendingAction === "recipe-delete"}
           error={error}
@@ -864,6 +1039,15 @@ export default function App() {
   );
 }
 
+function getKitchenGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 10) return "早安 · 早餐时间";
+  if (hour < 14) return "午间厨房 · 准备开饭";
+  if (hour < 17) return "午后备菜 · 挑道好菜";
+  if (hour < 21) return "晚餐时光 · 家里开火";
+  return "夜宵灵感 · 简单吃点";
+}
+
 function IngredientSelectionSheet({ categories, busy, error, onGenerate, onClose }) {
   const [selectedIds, setSelectedIds] = useState([]);
 
@@ -883,9 +1067,7 @@ function IngredientSelectionSheet({ categories, busy, error, onGenerate, onClose
   }, [busy, onClose]);
 
   function toggleIngredient(id) {
-    setSelectedIds((current) => current.includes(id)
-      ? current.filter((item) => item !== id)
-      : [...current, id]);
+    setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
   return (
@@ -901,10 +1083,10 @@ function IngredientSelectionSheet({ categories, busy, error, onGenerate, onClose
         <header className="sheet-header">
           <div>
             <h2 id="ingredient-selection-title">选择想用的食材</h2>
-            <p>不选择时将使用全部库存生成。</p>
+            <p>不选择时将根据全部库存推荐，优先消耗快过期食材</p>
           </div>
           <button className="close-button" type="button" onClick={onClose} disabled={busy} aria-label="关闭食材选择">
-            <X size={23} />
+            <X size={20} />
           </button>
         </header>
 
@@ -925,9 +1107,11 @@ function IngredientSelectionSheet({ categories, busy, error, onGenerate, onClose
                       onClick={() => toggleIngredient(ingredient.id)}
                       disabled={busy}
                     >
-                      {selected && <Check size={16} aria-hidden="true" />}
+                      {selected && <Check size={15} aria-hidden="true" />}
                       <span>{ingredient.name}</span>
-                      {stateLabels[ingredient.state] && <small>{stateLabels[ingredient.state]}</small>}
+                      {stateLabels[ingredient.state] && (
+                        <small className={ingredient.state}>{stateLabels[ingredient.state]}</small>
+                      )}
                     </button>
                   );
                 })}
@@ -936,11 +1120,17 @@ function IngredientSelectionSheet({ categories, busy, error, onGenerate, onClose
           ))}
         </div>
 
-        {error && <div className="form-error" role="alert">{error}</div>}
+        {error && (
+          <div className="form-error" role="alert">
+            {error}
+          </div>
+        )}
 
         <div className="selection-actions">
           {selectedIds.length > 0 && (
-            <button className="text-button" type="button" onClick={() => setSelectedIds([])} disabled={busy}>清除选择</button>
+            <button className="text-button" type="button" onClick={() => setSelectedIds([])} disabled={busy}>
+              清除选择
+            </button>
           )}
           <button className="primary-button" type="button" onClick={() => onGenerate(selectedIds)} disabled={busy}>
             <Sparkles size={18} />
@@ -983,21 +1173,23 @@ function AccessGate({ onUnlock }) {
   return (
     <main className="access-page">
       <form className="access-card" onSubmit={unlock}>
-        <div className="brand access-brand">
-          <ChefHat size={34} />
-          <span>Happy Eat</span>
+        <div className="access-emblem" aria-hidden="true">
+          <ChefHat size={32} strokeWidth={2} />
         </div>
+        <span className="access-eyebrow">HAPPY EAT · 家庭厨房</span>
         <h1>打开家庭空间</h1>
-        <p>输入家庭访问码，查看和维护真实家庭食材与菜谱。</p>
+        <p>输入家庭访问码，查看冰箱食材、匹配今晚好菜与共享菜谱。</p>
         <input
           value={accessCode}
           onChange={(event) => setAccessCode(event.target.value)}
           aria-label="家庭访问码"
+          placeholder="请输入家庭访问码"
+          autoComplete="current-password"
           autoFocus
         />
         {error && <div className="notice">{error}</div>}
         <button className="wide-primary" type="submit" disabled={busy}>
-          进入
+          {busy ? "正在验证..." : "进入"}
         </button>
       </form>
     </main>
@@ -1014,36 +1206,43 @@ function CategoryRail({ categories, selectedCategory, onSelect, total }) {
 
   return (
     <div className="category-rail">
-      {ordered.filter((name) => counts.has(name)).map((name) => (
-        <button
-          key={name}
-          className={selectedCategory === name ? "active" : ""}
-          type="button"
-          onClick={() => onSelect(name)}
-        >
-          {name} <span>{counts.get(name)}</span>
-        </button>
-      ))}
+      {ordered
+        .filter((name) => counts.has(name))
+        .map((name) => (
+          <button
+            key={name}
+            className={selectedCategory === name ? "active" : ""}
+            type="button"
+            onClick={() => onSelect(name)}
+          >
+            {name} <span>{counts.get(name)}</span>
+          </button>
+        ))}
     </div>
   );
 }
 
-function IngredientChip({ ingredient, onEdit, disabled }) {
+function IngredientChip({ ingredient, showCategory, onEdit, disabled }) {
   const stateLabel = stateLabels[ingredient.state] || "";
 
   return (
     <button
-      className="ingredient-chip"
+      className={`ingredient-chip state-${ingredient.state}`}
       type="button"
       onClick={onEdit}
       disabled={disabled}
       aria-label={`编辑${ingredient.name}`}
     >
       <span className="ingredient-summary">
-        <span className="ingredient-name">{ingredient.name}</span>
-        {stateLabel && <span className={`state-tag ${ingredient.state}`}>{stateLabel}</span>}
+        <span className="ingredient-name-row">
+          <span className="ingredient-name">{ingredient.name}</span>
+          {stateLabel && <span className={`state-tag ${ingredient.state}`}>{stateLabel}</span>}
+        </span>
+        {showCategory && <span className="ingredient-category-sub">{ingredient.category}</span>}
       </span>
-      <Pencil size={15} aria-hidden="true" />
+      <span className="ingredient-edit-icon" aria-hidden="true">
+        <Pencil size={14} />
+      </span>
     </button>
   );
 }
@@ -1055,38 +1254,74 @@ function RecipeList({ recipes, onOpen, emptyMessage }) {
 
   return (
     <div className="recipe-list">
-      {recipes.map((recipe) => (
-        <article
-          className="recipe-row"
-          key={recipe.id}
-          role="button"
-          tabIndex={0}
-          onClick={() => onOpen(recipe)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              onOpen(recipe);
-            }
-          }}
-        >
-          <div className="recipe-main">
-            <div className="recipe-title-line">
-              <h3>{recipe.title}</h3>
-              {recipe.preferenceWarning && <span className="state-tag expiring">{recipe.preferenceWarning}</span>}
+      {recipes.map((recipe) => {
+        const tone = methodTones[recipe.method] || "neutral";
+        const isReady = recipe.missing.length === 0;
+        return (
+          <article
+            className={`recipe-row tone-${tone}${isReady ? " is-ready" : " is-missing"}`}
+            key={recipe.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpen(recipe)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpen(recipe);
+              }
+            }}
+          >
+            <div className="recipe-main">
+              <div className="recipe-card-head">
+                <div className="recipe-title-line">
+                  <span className={`method-dot tone-${tone}`} aria-hidden="true">
+                    {recipe.method}
+                  </span>
+                  <h3>{recipe.title}</h3>
+                </div>
+                <div className="recipe-card-right">
+                  {isReady ? (
+                    <span className="readiness-pill ready">可立刻做</span>
+                  ) : (
+                    <span className="readiness-pill missing">缺 {recipe.missing.length} 样</span>
+                  )}
+                  <ChevronRight className="recipe-chevron" size={16} aria-hidden="true" />
+                </div>
+              </div>
+
+              <div className="recipe-meta">
+                <span>
+                  <Clock3 size={14} aria-hidden="true" />
+                  {recipe.minutes} 分钟
+                </span>
+                <span>
+                  <ChefHat size={14} aria-hidden="true" />
+                  {recipe.method}
+                </span>
+                {recipe.usesPriority && (
+                  <span className="meta-priority-pill">
+                    <Flame size={12} aria-hidden="true" />
+                    用掉优先食材
+                  </span>
+                )}
+                {recipe.preferenceWarning && <span className="state-tag expiring">{recipe.preferenceWarning}</span>}
+              </div>
+
+              {recipe.missing.length > 0 ? (
+                <p className="missing-line">缺：{recipe.missing.join("、")}</p>
+              ) : (
+                <p className="recipe-ingredients-line">
+                  {recipe.ingredients
+                    .filter((item) => item.required)
+                    .map((item) => item.name)
+                    .join(" · ")}
+                </p>
+              )}
+              {recipe.substitutions.length > 0 && <p className="substitution">{recipe.substitutions[0]}</p>}
             </div>
-            <div className="recipe-meta">
-              <span><Clock3 size={15} />{recipe.minutes} 分钟</span>
-              <span><ChefHat size={15} />{recipe.method}</span>
-            </div>
-            {recipe.missing.length > 0 ? (
-              <p className="missing-line">缺：{recipe.missing.join("、")}</p>
-            ) : (
-              <p>{recipe.ingredients.filter((item) => item.required).map((item) => item.name).join("、")}</p>
-            )}
-            {recipe.substitutions.length > 0 && <p className="substitution">{recipe.substitutions[0]}</p>}
-          </div>
-        </article>
-      ))}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -1136,7 +1371,7 @@ function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDe
             <p>{editing ? "修改后会立即更新菜谱匹配。" : "记录家里现在能用来做饭的食材。"}</p>
           </div>
           <button className="close-button" type="button" onClick={onClose} disabled={busy} aria-label="关闭食材编辑">
-            <X size={23} />
+            <X size={20} />
           </button>
         </header>
 
@@ -1147,6 +1382,7 @@ function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDe
               value={form.name}
               onChange={(event) => update("name", event.target.value)}
               maxLength={40}
+              placeholder="例如：西蓝花、鸡腿肉"
               autoFocus
               required
             />
@@ -1155,18 +1391,20 @@ function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDe
           <fieldset className="option-field">
             <legend>食材分类</legend>
             <div className="option-grid category-options">
-              {[{ value: "", label: "自动分类" }, ...ingredientCategories.map((category) => ({ value: category, label: category }))].map((option) => (
-                <label key={option.label} className={form.category === option.value ? "selected" : ""}>
-                  <input
-                    type="radio"
-                    name="ingredient-category"
-                    value={option.value}
-                    checked={form.category === option.value}
-                    onChange={(event) => update("category", event.target.value)}
-                  />
-                  <span>{option.label}</span>
-                </label>
-              ))}
+              {[{ value: "", label: "自动分类" }, ...ingredientCategories.map((category) => ({ value: category, label: category }))].map(
+                (option) => (
+                  <label key={option.label} className={form.category === option.value ? "selected" : ""}>
+                    <input
+                      type="radio"
+                      name="ingredient-category"
+                      value={option.value}
+                      checked={form.category === option.value}
+                      onChange={(event) => update("category", event.target.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ),
+              )}
             </div>
           </fieldset>
 
@@ -1188,13 +1426,19 @@ function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDe
             </div>
           </fieldset>
 
-          {error && <div className="form-error" role="alert">{error}</div>}
+          {error && (
+            <div className="form-error" role="alert">
+              {error}
+            </div>
+          )}
 
           {confirmDelete ? (
             <div className="delete-confirmation">
               <p>确认删除“{form.name}”？可做菜谱会立即重新匹配。</p>
               <div>
-                <button className="secondary-button" type="button" onClick={() => setConfirmDelete(false)} disabled={busy}>取消</button>
+                <button className="secondary-button" type="button" onClick={() => setConfirmDelete(false)} disabled={busy}>
+                  取消
+                </button>
                 <button className="danger-button solid" type="button" onClick={() => onDelete(form.id)} disabled={busy}>
                   {deleting ? "正在删除" : "确认删除"}
                 </button>
@@ -1204,7 +1448,7 @@ function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDe
             <div className="form-actions">
               {editing && (
                 <button className="danger-button" type="button" onClick={() => setConfirmDelete(true)} disabled={busy}>
-                  <Trash2 size={18} />
+                  <Trash2 size={17} />
                   删除食材
                 </button>
               )}
@@ -1250,7 +1494,7 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
   function updateIngredient(index, field, value) {
     setForm((current) => ({
       ...current,
-      ingredients: current.ingredients.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item),
+      ingredients: current.ingredients.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)),
     }));
   }
 
@@ -1271,7 +1515,7 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
   function updateStep(index, value) {
     setForm((current) => ({
       ...current,
-      steps: current.steps.map((step, stepIndex) => stepIndex === index ? value : step),
+      steps: current.steps.map((step, stepIndex) => (stepIndex === index ? value : step)),
     }));
   }
 
@@ -1291,29 +1535,48 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
       ...form,
       title: form.title.trim(),
       minutes: Number(form.minutes),
-      ingredients: form.ingredients.map((item) => ({ ...item, name: item.name.trim(), quantityLabel: item.quantityLabel.trim() })),
+      ingredients: form.ingredients.map((item) => ({
+        ...item,
+        name: item.name.trim(),
+        quantityLabel: item.quantityLabel.trim(),
+      })),
       steps: form.steps.map((step) => step.trim()),
     };
   }
 
   return (
     <div className="sheet-backdrop" role="presentation" onClick={() => !busy && onClose()}>
-      <section className="draft-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="draft-editor-title" onClick={(event) => event.stopPropagation()}>
+      <section
+        className="draft-editor-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="draft-editor-title"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="sheet-handle" aria-hidden="true" />
         <header className="sheet-header">
           <div>
             <h2 id="draft-editor-title">{isDraft ? "检查菜谱草稿" : "编辑菜谱"}</h2>
             <p>{isDraft ? "确认标题、食材和步骤后再保存到菜谱库。" : "修改后会立即更新菜谱匹配。"}</p>
           </div>
-          <button className="close-button" type="button" onClick={onClose} disabled={busy} aria-label={isDraft ? "关闭草稿编辑" : "关闭菜谱编辑"}>
-            <X size={23} />
+          <button
+            className="close-button"
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label={isDraft ? "关闭草稿编辑" : "关闭菜谱编辑"}
+          >
+            <X size={20} />
           </button>
         </header>
 
-        <form className="draft-editor-form" onSubmit={(event) => {
-          event.preventDefault();
-          onSave(payload(), isDraft && event.nativeEvent.submitter?.value === "confirm");
-        }}>
+        <form
+          className="draft-editor-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSave(payload(), isDraft && event.nativeEvent.submitter?.value === "confirm");
+          }}
+        >
           <label className="form-field">
             <span>菜谱标题</span>
             <input value={form.title} onChange={(event) => update("title", event.target.value)} maxLength={40} required />
@@ -1323,37 +1586,70 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
             <label className="form-field">
               <span>烹饪方式</span>
               <select value={form.method} onChange={(event) => update("method", event.target.value)}>
-                {cookingMethods.map((method) => <option key={method} value={method}>{method}</option>)}
+                {cookingMethods.map((method) => (
+                  <option key={method} value={method}>
+                    {method}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="form-field">
               <span>烹饪时间（分钟）</span>
-              <input type="number" min="1" max="240" value={form.minutes} onChange={(event) => update("minutes", event.target.value)} required />
+              <input
+                type="number"
+                min="1"
+                max="240"
+                value={form.minutes}
+                onChange={(event) => update("minutes", event.target.value)}
+                required
+              />
             </label>
           </div>
 
           <section className="draft-edit-section" aria-labelledby="draft-ingredients-title">
             <div className="draft-edit-heading">
               <h3 id="draft-ingredients-title">食材</h3>
-              <button className="text-button" type="button" onClick={addIngredient} aria-label="添加食材项"><Plus size={16} />添加</button>
+              <button className="text-button" type="button" onClick={addIngredient} aria-label="添加食材项">
+                <Plus size={16} />
+                添加
+              </button>
             </div>
             <div className="draft-edit-list">
               {form.ingredients.map((item, index) => (
                 <div className="draft-ingredient-row" key={index}>
                   <label>
                     <span className="sr-only">食材名称 {index + 1}</span>
-                    <input value={item.name} onChange={(event) => updateIngredient(index, "name", event.target.value)} placeholder="食材名称" required />
+                    <input
+                      value={item.name}
+                      onChange={(event) => updateIngredient(index, "name", event.target.value)}
+                      placeholder="食材名称"
+                      required
+                    />
                   </label>
                   <label>
                     <span className="sr-only">食材用量 {index + 1}</span>
-                    <input value={item.quantityLabel} onChange={(event) => updateIngredient(index, "quantityLabel", event.target.value)} placeholder="参考用量" />
+                    <input
+                      value={item.quantityLabel}
+                      onChange={(event) => updateIngredient(index, "quantityLabel", event.target.value)}
+                      placeholder="参考用量"
+                    />
                   </label>
                   <label className="required-toggle">
-                    <input type="checkbox" checked={item.required} onChange={(event) => updateIngredient(index, "required", event.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={item.required}
+                      onChange={(event) => updateIngredient(index, "required", event.target.checked)}
+                    />
                     <span>必需</span>
                   </label>
-                  <button className="icon-button" type="button" onClick={() => removeIngredient(index)} aria-label={`删除食材 ${index + 1}`} title="删除食材">
-                    <Trash2 size={17} />
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => removeIngredient(index)}
+                    aria-label={`删除食材 ${index + 1}`}
+                    title="删除食材"
+                  >
+                    <Trash2 size={16} />
                   </button>
                 </div>
               ))}
@@ -1363,41 +1659,54 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
           <section className="draft-edit-section" aria-labelledby="draft-steps-title">
             <div className="draft-edit-heading">
               <h3 id="draft-steps-title">烹饪步骤</h3>
-              <button className="text-button" type="button" onClick={addStep} aria-label="添加烹饪步骤"><Plus size={16} />添加</button>
+              <button className="text-button" type="button" onClick={addStep} aria-label="添加烹饪步骤">
+                <Plus size={16} />
+                添加
+              </button>
             </div>
             <div className="draft-edit-list">
               {form.steps.map((step, index) => (
                 <div className="draft-step-row" key={index}>
-                  <span>{index + 1}</span>
+                  <span className="step-num-badge">{index + 1}</span>
                   <label>
                     <span className="sr-only">烹饪步骤 {index + 1}</span>
                     <textarea value={step} onChange={(event) => updateStep(index, event.target.value)} rows={2} required />
                   </label>
-                  <button className="icon-button" type="button" onClick={() => removeStep(index)} aria-label={`删除步骤 ${index + 1}`} title="删除步骤">
-                    <Trash2 size={17} />
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => removeStep(index)}
+                    aria-label={`删除步骤 ${index + 1}`}
+                    title="删除步骤"
+                  >
+                    <Trash2 size={16} />
                   </button>
                 </div>
               ))}
             </div>
           </section>
 
-          {error && <div className="form-error" role="alert">{error}</div>}
+          {error && (
+            <div className="form-error" role="alert">
+              {error}
+            </div>
+          )}
 
           <div className="draft-editor-actions">
             {isDraft ? (
               <>
                 <button className="secondary-button" type="submit" value="save" disabled={busy}>
-                  <Save size={18} />
+                  <Save size={17} />
                   {busy ? "正在保存" : "保存草稿"}
                 </button>
                 <button className="primary-button" type="submit" value="confirm" disabled={busy}>
-                  <Check size={18} />
+                  <Check size={17} />
                   {busy ? "正在保存" : "确认并保存"}
                 </button>
               </>
             ) : (
               <button className="primary-button full" type="submit" disabled={busy}>
-                <Save size={18} />
+                <Save size={17} />
                 {busy ? "正在保存" : "保存修改"}
               </button>
             )}
@@ -1436,6 +1745,7 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
 
   const completed = progress.ingredients.length + progress.steps.length;
   const total = required.length + recipe.steps.length;
+  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   function setConsumption(name, action) {
     setConsumptions((current) => ({ ...current, [name]: action }));
@@ -1453,25 +1763,42 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
     <div className="cooking-mode" role="dialog" aria-modal="true" aria-labelledby="cooking-title">
       <header className="cooking-header">
         <button className="icon-button" type="button" onClick={onClose} aria-label="返回菜谱详情" title="返回">
-          <ChevronLeft size={24} />
+          <ChevronLeft size={22} />
         </button>
-        <div>
-          <p>正在烹饪</p>
+        <div className="cooking-header-title">
+          <p>正在烹饪 · {recipe.minutes} 分钟</p>
           <h2 id="cooking-title">{recipe.title}</h2>
         </div>
-        <span>{completed}/{total}</span>
+        <span className="cooking-progress-count">
+          {completed}/{total}
+        </span>
+        <div className="cooking-progress-track" aria-hidden="true">
+          <div className="cooking-progress-fill" style={{ width: `${percent}%` }} />
+        </div>
       </header>
 
       <main className="cooking-content">
         <section aria-labelledby="cooking-ingredients-title">
-          <h3 id="cooking-ingredients-title">准备食材</h3>
+          <div className="cooking-section-head">
+            <h3 id="cooking-ingredients-title">准备食材</h3>
+            <span>
+              {progress.ingredients.length}/{required.length}
+            </span>
+          </div>
           <div className="cooking-checklist">
             {required.map((item, index) => {
               const key = `${index}-${item.name}`;
               return (
                 <label key={key}>
-                  <input type="checkbox" checked={progress.ingredients.includes(key)} onChange={() => toggle("ingredients", key)} />
-                  <span>{item.name}{item.quantityLabel && ` · ${item.quantityLabel}`}</span>
+                  <input
+                    type="checkbox"
+                    checked={progress.ingredients.includes(key)}
+                    onChange={() => toggle("ingredients", key)}
+                  />
+                  <span>
+                    {item.name}
+                    {item.quantityLabel && ` · ${item.quantityLabel}`}
+                  </span>
                 </label>
               );
             })}
@@ -1479,14 +1806,22 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
         </section>
 
         <section aria-labelledby="cooking-steps-title">
-          <h3 id="cooking-steps-title">烹饪步骤</h3>
+          <div className="cooking-section-head">
+            <h3 id="cooking-steps-title">烹饪步骤</h3>
+            <span>
+              {progress.steps.length}/{recipe.steps.length}
+            </span>
+          </div>
           <div className="cooking-checklist cooking-steps">
             {recipe.steps.map((step, index) => {
               const key = String(step.position);
               return (
                 <label key={key}>
                   <input type="checkbox" checked={progress.steps.includes(key)} onChange={() => toggle("steps", key)} />
-                  <span><strong>{index + 1}</strong>{step.text}</span>
+                  <span>
+                    <strong>{index + 1}</strong>
+                    {step.text}
+                  </span>
                 </label>
               );
             })}
@@ -1504,13 +1839,20 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
       {confirming && (
         <div className="consumption-backdrop" role="presentation">
           <section className="consumption-sheet" role="dialog" aria-modal="true" aria-labelledby="consumption-title">
+            <div className="sheet-handle" aria-hidden="true" />
             <header className="sheet-header">
               <div>
                 <h2 id="consumption-title">这次用掉了什么？</h2>
-                <p>确认后会立即更新家里的食材。</p>
+                <p>确认后会立即更新家里的食材清单</p>
               </div>
-              <button className="close-button" type="button" onClick={() => setConfirming(false)} disabled={busy} aria-label="关闭消耗确认">
-                <X size={22} />
+              <button
+                className="close-button"
+                type="button"
+                onClick={() => setConfirming(false)}
+                disabled={busy}
+                aria-label="关闭消耗确认"
+              >
+                <X size={20} />
               </button>
             </header>
 
@@ -1544,14 +1886,18 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
               ))}
             </div>
 
-            {error && <p className="sheet-error" role="alert">{error}</p>}
+            {error && (
+              <p className="sheet-error" role="alert">
+                {error}
+              </p>
+            )}
 
             <div className="consumption-actions">
               <button className="secondary-button" type="button" onClick={() => finishCooking(true)} disabled={busy}>
                 库存没变化
               </button>
               <button className="primary-button" type="button" onClick={() => finishCooking(false)} disabled={busy}>
-                <Check size={18} />
+                <Check size={17} />
                 {busy ? "正在更新" : "确认并更新"}
               </button>
             </div>
@@ -1562,10 +1908,25 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
   );
 }
 
-function RecipeDetailSheet({ recipe, busy, deleting, error, onEdit, onDelete, onClose, onStartCooking }) {
+function RecipeDetailSheet({ recipe, availableNames, busy, deleting, error, onEdit, onDelete, onClose, onStartCooking }) {
   const required = recipe.ingredients.filter((item) => item.required);
   const optional = recipe.ingredients.filter((item) => !item.required);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function closeOnEscape(event) {
+      if (event.key === "Escape" && !busy) onClose();
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [busy, onClose]);
 
   return (
     <div className="sheet-backdrop" role="presentation" onClick={() => !busy && onClose()}>
@@ -1581,62 +1942,87 @@ function RecipeDetailSheet({ recipe, busy, deleting, error, onEdit, onDelete, on
           <div>
             <h2 id="recipe-sheet-title">{recipe.title}</h2>
             <div className="recipe-meta">
-              <span><Clock3 size={15} />{recipe.minutes} 分钟</span>
-              <span><ChefHat size={15} />{recipe.method}</span>
+              <span>
+                <Clock3 size={14} aria-hidden="true" />
+                {recipe.minutes} 分钟
+              </span>
+              <span>
+                <ChefHat size={14} aria-hidden="true" />
+                {recipe.method}
+              </span>
             </div>
           </div>
           <button className="close-button" type="button" onClick={onClose} disabled={busy} aria-label="关闭菜谱详情">
-            <X size={23} />
+            <X size={20} />
           </button>
         </header>
 
-        {recipe.preferenceWarning && <p className="detail-warning">{recipe.preferenceWarning}</p>}
-        {recipe.missing.length > 0 && <p className="detail-missing">缺：{recipe.missing.join("、")}</p>}
-        {recipe.substitutions.length > 0 && (
-          <div className="detail-block">
-            <h3>替代建议</h3>
-            <ul>
-              {recipe.substitutions.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-          </div>
-        )}
+        <div className="recipe-sheet-body">
+          {recipe.preferenceWarning && <p className="detail-warning">{recipe.preferenceWarning}</p>}
+          {recipe.missing.length > 0 && <p className="detail-missing">缺：{recipe.missing.join("、")}</p>}
+          {recipe.substitutions.length > 0 && (
+            <div className="detail-block">
+              <h3>替代建议</h3>
+              <ul className="substitution-list">
+                {recipe.substitutions.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-        <div className="detail-block">
-          <h3>必需食材</h3>
-          <div className="mini-chips">
-            {required.map((item) => (
-              <span key={`required-${item.name}`}>{item.name}{item.quantityLabel && ` × ${item.quantityLabel}`}</span>
-            ))}
-          </div>
-        </div>
-
-        {optional.length > 0 && (
           <div className="detail-block">
-            <h3>可选食材</h3>
+            <h3>必需食材</h3>
             <div className="mini-chips">
-              {optional.map((item) => (
-                <span key={`optional-${item.name}`}>{item.name}{item.quantityLabel && ` × ${item.quantityLabel}`}</span>
-              ))}
+              {required.map((item) => {
+                const hasIt = availableNames.has(item.name);
+                return (
+                  <span key={`required-${item.name}`} className={hasIt ? "chip-available" : "chip-missing"}>
+                    {item.name}
+                    {item.quantityLabel && ` × ${item.quantityLabel}`}
+                  </span>
+                );
+              })}
             </div>
           </div>
-        )}
 
-        <div className="detail-block">
-          <h3>烹饪步骤</h3>
-          <ol className="step-list">
-            {recipe.steps.map((step) => (
-              <li key={step.position}>{step.text}</li>
-            ))}
-          </ol>
+          {optional.length > 0 && (
+            <div className="detail-block">
+              <h3>可选食材</h3>
+              <div className="mini-chips">
+                {optional.map((item) => (
+                  <span key={`optional-${item.name}`}>
+                    {item.name}
+                    {item.quantityLabel && ` × ${item.quantityLabel}`}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="detail-block">
+            <h3>烹饪步骤</h3>
+            <ol className="step-list">
+              {recipe.steps.map((step) => (
+                <li key={step.position}>{step.text}</li>
+              ))}
+            </ol>
+          </div>
+
+          {error && (
+            <div className="form-error recipe-detail-error" role="alert">
+              {error}
+            </div>
+          )}
         </div>
-
-        {error && <div className="form-error recipe-detail-error" role="alert">{error}</div>}
 
         {confirmDelete ? (
           <div className="delete-confirmation recipe-delete-confirmation">
             <p>确认删除“{recipe.title}”？删除后无法恢复。</p>
             <div>
-              <button className="secondary-button" type="button" onClick={() => setConfirmDelete(false)} disabled={busy}>取消</button>
+              <button className="secondary-button" type="button" onClick={() => setConfirmDelete(false)} disabled={busy}>
+                取消
+              </button>
               <button className="danger-button solid" type="button" onClick={() => onDelete(recipe.id)} disabled={busy}>
                 {deleting ? "正在删除" : "确认删除"}
               </button>
@@ -1644,17 +2030,17 @@ function RecipeDetailSheet({ recipe, busy, deleting, error, onEdit, onDelete, on
           </div>
         ) : (
           <div className="recipe-detail-actions">
-            <button className="secondary-button" type="button" onClick={onEdit} disabled={busy}>
-              <Pencil size={18} />
-              编辑菜谱
-            </button>
-            <button className="danger-button" type="button" onClick={() => setConfirmDelete(true)} disabled={busy}>
-              <Trash2 size={18} />
-              删除菜谱
-            </button>
             <button className="primary-button" type="button" onClick={onStartCooking} disabled={busy}>
               <Play size={18} />
               开始烹饪
+            </button>
+            <button className="secondary-button" type="button" onClick={onEdit} disabled={busy}>
+              <Pencil size={16} />
+              编辑菜谱
+            </button>
+            <button className="danger-button" type="button" onClick={() => setConfirmDelete(true)} disabled={busy}>
+              <Trash2 size={16} />
+              删除菜谱
             </button>
           </div>
         )}
@@ -1667,7 +2053,7 @@ function DraftList({ drafts, onEdit, disabled }) {
   if (drafts.length === 0) {
     return (
       <div className="draft-empty">
-        <Bell size={18} />
+        <Bell size={17} />
         <span>解析后会先生成菜谱草稿，确认后才进入菜谱库。</span>
       </div>
     );
@@ -1678,20 +2064,30 @@ function DraftList({ drafts, onEdit, disabled }) {
       {drafts.map((draft) => (
         <article key={draft.id} className="draft-card">
           <div className="draft-header">
-            <h3>{draft.title}</h3>
-            <span>{draft.method} · {draft.minutes} 分钟</span>
+            <div>
+              <span className="draft-source-pill">{draftSourceLabels[draft.sourceType] || "待确认草稿"}</span>
+              <h3>{draft.title}</h3>
+            </div>
+            <span className="draft-meta-pill">
+              {draft.method} · {draft.minutes} 分钟
+            </span>
           </div>
           <div className="draft-columns">
             <div>
               <h4>必需食材</h4>
               <div className="mini-chips">
-                {draft.ingredients.filter((item) => item.required).map((item) => (
-                  <span key={`${draft.id}-${item.name}`}>{item.name}{item.quantityLabel && ` × ${item.quantityLabel}`}</span>
-                ))}
+                {draft.ingredients
+                  .filter((item) => item.required)
+                  .map((item) => (
+                    <span key={`${draft.id}-${item.name}`}>
+                      {item.name}
+                      {item.quantityLabel && ` × ${item.quantityLabel}`}
+                    </span>
+                  ))}
               </div>
             </div>
             <div>
-              <h4>步骤</h4>
+              <h4>步骤预览（共 {draft.steps.length} 步）</h4>
               <ol>
                 {draft.steps.slice(0, 3).map((step) => (
                   <li key={step.position}>{step.text}</li>
@@ -1700,7 +2096,7 @@ function DraftList({ drafts, onEdit, disabled }) {
             </div>
           </div>
           <button className="primary-button full" type="button" onClick={() => onEdit(draft)} disabled={disabled}>
-            <Pencil size={17} />
+            <Pencil size={16} />
             检查草稿
           </button>
         </article>
@@ -1721,12 +2117,12 @@ function filterIngredients(ingredients, category, query) {
 function filterRecipes(recipes, query, method, time) {
   const normalizedQuery = normalizeSearchTerm(query);
   return recipes.filter((recipe) => {
-    const matchesQuery = !normalizedQuery
+    const matchesQuery =
+      !normalizedQuery
       || recipe.title.includes(normalizedQuery)
       || recipe.ingredients.some((item) => item.name.includes(normalizedQuery));
     const matchesMethod = !method || recipe.method === method;
-    const matchesTime = !time
-      || (time === "long" ? recipe.minutes > 30 : recipe.minutes <= Number(time));
+    const matchesTime = !time || (time === "long" ? recipe.minutes > 30 : recipe.minutes <= Number(time));
     return matchesQuery && matchesMethod && matchesTime;
   });
 }
@@ -1758,12 +2154,15 @@ function VoiceInputButton({ token, disabled, onTranscript, onError }) {
   const timerRef = useRef(null);
   const mountedRef = useRef(true);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    clearTimeout(timerRef.current);
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-  }, []);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      clearTimeout(timerRef.current);
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    },
+    [],
+  );
 
   async function startRecording() {
     onError("");
@@ -1773,8 +2172,9 @@ function VoiceInputButton({ token, disabled, onTranscript, onError }) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
-      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
-        .find((type) => MediaRecorder.isTypeSupported(type));
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find((type) =>
+        MediaRecorder.isTypeSupported(type),
+      );
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       recorderRef.current = recorder;
       streamRef.current = stream;
@@ -1837,11 +2237,13 @@ function VoiceInputButton({ token, disabled, onTranscript, onError }) {
       aria-label={label}
       title={label}
     >
-      {recording
-        ? <Square size={18} fill="currentColor" />
-        : status === "transcribing"
-          ? <LoaderCircle className="spin" size={20} />
-          : <Mic size={21} />}
+      {recording ? (
+        <Square size={17} fill="currentColor" />
+      ) : status === "transcribing" ? (
+        <LoaderCircle className="spin" size={19} />
+      ) : (
+        <Mic size={20} />
+      )}
     </button>
   );
 }
@@ -1871,7 +2273,8 @@ function encodeWav(audioBuffer) {
   const samples = audioBuffer.getChannelData(0);
   const data = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(data);
-  const writeText = (offset, text) => [...text].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
+  const writeText = (offset, text) =>
+    [...text].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
   writeText(0, "RIFF");
   view.setUint32(4, 36 + samples.length * 2, true);
   writeText(8, "WAVEfmt ");
