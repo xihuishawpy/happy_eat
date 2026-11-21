@@ -89,6 +89,30 @@ test("Netlify Function supports auth, seed initialization, and CRUD mutations", 
   );
 });
 
+test("Netlify draft deletion persists, retries conflicts, and protects formal recipes", async () => {
+  const store = new MemoryBlobStore();
+  const handler = createApiHandler({ store, env: { FAMILY_ACCESS_CODE: "test-family", DASHSCOPE_API_KEY: "" } });
+  const analyzed = await callApi(handler, "/api/drafts/analyze", {
+    method: "POST",
+    body: { sourceType: "text", content: "《丝瓜炒蛋》丝瓜1根、鸡蛋2个。1.丝瓜切块。2.鸡蛋与丝瓜炒熟。" },
+  });
+  const draftId = analyzed.payload.draft.id;
+  const before = analyzed.payload.app;
+  const formalId = before.matches.ready[0].id;
+  assert.equal((await callApi(handler, `/api/drafts/${formalId}`, { method: "DELETE" })).status, 404);
+  assert.equal((await callApi(handler, `/api/drafts/${draftId}`, { method: "DELETE", auth: false })).status, 401);
+  store.failFirstMatchCount = 1;
+  const removed = await callApi(handler, `/api/drafts/${draftId}`, { method: "DELETE" });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.payload.drafts.some((item) => item.id === draftId), false);
+  const reloaded = await callApi(handler, "/api/app");
+  assert.deepEqual(reloaded.payload.drafts, []);
+  assert.deepEqual(reloaded.payload.matches, before.matches);
+  assert.deepEqual(reloaded.payload.ingredients, before.ingredients);
+  assert.equal((await callApi(handler, `/api/drafts/${draftId}`, { method: "DELETE" })).status, 404);
+  assert.equal((await callApi(handler, `/api/drafts/${draftId}/confirm`, { method: "POST" })).status, 404);
+});
+
 test("Netlify Function enforces rate limits, SSRF, and missing config boundaries", async () => {
   const store = new MemoryBlobStore();
   const unconfigured = createApiHandler({ store, env: { FAMILY_ACCESS_CODE: "" } });

@@ -231,6 +231,15 @@ app.patch("/api/drafts/:id", route(async (req, res) => {
   res.json({ draft: publicRecipe(draft), app: buildApp(state) });
 }));
 
+app.delete("/api/drafts/:id", route(async (req, res) => {
+  const state = await mutateState((draft) => {
+    const index = draft.recipes.findIndex((item) => String(item.id) === req.params.id && item.status === "draft");
+    if (index === -1) throw httpError(404, "菜谱草稿不存在或已经保存");
+    draft.recipes.splice(index, 1);
+  });
+  res.json(buildApp(state));
+}));
+
 app.post("/api/drafts/:id/confirm", route(async (req, res) => {
   const state = await mutateState((draft) => {
     const recipe = draft.recipes.find((item) => String(item.id) === req.params.id && item.status === "draft");

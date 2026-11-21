@@ -103,6 +103,14 @@ export function createApiHandler({ store, env } = {}) {
       if (draftMatch && request.method === "PATCH") {
         return await handleUpdateRecipe(request, activeStore, getEnv, draftMatch[1], "draft");
       }
+      if (draftMatch && request.method === "DELETE") {
+        const state = await mutateState(activeStore, (draft) => {
+          const index = draft.recipes.findIndex((item) => String(item.id) === draftMatch[1] && item.status === "draft");
+          if (index === -1) throw httpError(404, "菜谱草稿不存在或已经保存");
+          draft.recipes.splice(index, 1);
+        });
+        return json(buildApp(state, getEnv));
+      }
 
       const confirmMatch = pathname.match(/^\/api\/drafts\/([^/]+)\/confirm$/);
       if (confirmMatch && request.method === "POST") {

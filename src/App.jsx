@@ -470,6 +470,24 @@ export default function App() {
     }
   }
 
+  async function removeDraft(id) {
+    setPendingAction("draft-delete");
+    setSyncState("syncing");
+    setError("");
+    try {
+      setApp(await api(`/api/drafts/${id}`, { token, method: "DELETE" }));
+      setCreateNotice("");
+      setSyncState("synced");
+      return true;
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+      return false;
+    } finally {
+      setPendingAction("");
+    }
+  }
+
   async function saveFormalRecipe(recipe) {
     setPendingAction("recipe-save");
     setSyncState("syncing");
@@ -1422,6 +1440,7 @@ export default function App() {
               setError("");
               setDraftEditor(draft);
             }}
+            onDeleteDraft={removeDraft}
             onClose={() => {
               setCreateSheetOpen(false);
               setCreateNotice("");
@@ -2027,9 +2046,11 @@ function CreateRecipeSheet({
   onAnalyze,
   onOpenAiGenerate,
   onOpenDraft,
+  onDeleteDraft,
   onClose,
 }) {
   const [importMode, setImportMode] = useState(null); // null = menu | "image" | "text" | "web" | "voice"
+  const [deletingDraftId, setDeletingDraftId] = useState(null);
 
   useBodyLockAndEscape(busy, onClose);
 
@@ -2146,17 +2167,51 @@ function CreateRecipeSheet({
                           {draftSourceLabels[draft.sourceType] || "草稿"} · {draft.method} · {draft.minutes} 分钟
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        className="draft-confirm-pill"
-                        onClick={() => onOpenDraft(draft)}
-                        disabled={busy}
-                      >
-                        去确认
-                      </button>
+                      {deletingDraftId === draft.id ? (
+                        <div className="delete-confirm-box">
+                          <p>确认删除草稿「{draft.title}」？删除后无法恢复。</p>
+                          <div className="delete-confirm-actions">
+                            <button className="btn-soft flex1" type="button" onClick={() => setDeletingDraftId(null)} disabled={busy}>
+                              取消
+                            </button>
+                            <button
+                              className="btn-danger flex1"
+                              type="button"
+                              disabled={busy}
+                              onClick={async () => {
+                                if (await onDeleteDraft(draft.id)) setDeletingDraftId(null);
+                              }}
+                            >
+                              {busy ? "删除中..." : "确认删除"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="draft-compact-actions">
+                          <button className="btn-soft-sm" type="button" onClick={() => onOpenDraft(draft)} disabled={busy}>
+                            编辑
+                          </button>
+                          <button
+                            className="btn-danger-sm"
+                            type="button"
+                            onClick={() => {
+                              setError("");
+                              setDeletingDraftId(draft.id);
+                            }}
+                            disabled={busy}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
+              </div>
+            )}
+            {error && (
+              <div className="form-error" role="alert">
+                {error}
               </div>
             )}
           </div>
@@ -3353,8 +3408,8 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
         <div className="sheet-grab" aria-hidden="true" />
         <header className="sheet-top-row padded">
           <div>
-            <h2 id="draft-editor-title">{isDraft ? "检查菜谱草稿" : "编辑菜谱"}</h2>
-            <p className="sheet-subtitle">{isDraft ? "核对标题、食材和步骤后确认入库" : "修改后会立即重新匹配菜谱"}</p>
+            <h2 id="draft-editor-title">{isDraft ? "编辑菜谱草稿" : "编辑菜谱"}</h2>
+            <p className="sheet-subtitle">{isDraft ? "修改标题、食材和步骤，可保存草稿或确认入库" : "修改后会立即重新匹配菜谱"}</p>
           </div>
           <button
             className="sheet-close-btn"

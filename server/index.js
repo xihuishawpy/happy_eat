@@ -341,6 +341,14 @@ app.post("/api/consumption-events/:id/undo", (req, res) => {
 
 app.patch("/api/drafts/:id", (req, res) => updateRecipe(req, res, "draft"));
 
+app.delete("/api/drafts/:id", (req, res) => {
+  const result = db.prepare("DELETE FROM recipes WHERE id = ? AND status = 'draft'").run(req.params.id);
+  if (result.changes === 0) {
+    return res.status(404).json({ error: "菜谱草稿不存在或已经保存" });
+  }
+  res.json(readAppState());
+});
+
 app.patch("/api/recipes/:id", (req, res) => updateRecipe(req, res, "formal"));
 
 app.post("/api/drafts/:id/confirm", (req, res) => {

@@ -2356,7 +2356,8 @@ select:focus-visible,
 }
 
 .draft-compact-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   background: var(--surface);
@@ -2396,14 +2397,21 @@ select:focus-visible,
   color: var(--muted);
 }
 
-.draft-confirm-pill {
-  flex: none;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--primary);
-  background: var(--primary-soft);
-  padding: 7px 12px;
-  border-radius: 11px;
+.draft-compact-actions {
+  grid-column: 2;
+  display: flex;
+  gap: 8px;
+}
+
+.draft-compact-actions button {
+  flex: 1;
+  min-height: 44px;
+}
+
+.draft-compact-row .delete-confirm-box {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .sheet-back-title {

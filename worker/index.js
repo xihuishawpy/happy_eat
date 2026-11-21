@@ -81,6 +81,12 @@ export default {
       if (draftMatch && request.method === "PATCH") {
         return await updateRecipe(request, env, draftMatch[1], "draft");
       }
+      if (draftMatch && request.method === "DELETE") {
+        const result = await env.DB.prepare("DELETE FROM recipes WHERE id = ? AND status = 'draft'")
+          .bind(draftMatch[1]).run();
+        if (result.meta.changes === 0) return json({ error: "菜谱草稿不存在或已经保存" }, 404);
+        return json(await readAppState(env));
+      }
 
       const confirmMatch = pathname.match(/^\/api\/drafts\/([^/]+)\/confirm$/);
       if (confirmMatch && request.method === "POST") {

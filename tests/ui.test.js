@@ -143,15 +143,43 @@ test("家庭成员 can use the redesigned mobile cooking flow", { skip: process.
     await page.reload();
     await page.getByRole("button", { name: "添加菜谱" }).click();
     await page.getByText("测试保存菜谱").waitFor();
-    await page.getByRole("button", { name: "去确认" }).first().click();
+    await page.locator(".draft-compact-row").filter({ hasText: "测试保存菜谱" }).getByRole("button", { name: "编辑", exact: true }).click();
 
-    const draftEditor = page.getByRole("dialog", { name: "检查菜谱草稿" });
+    const draftEditor = page.getByRole("dialog", { name: "编辑菜谱草稿" });
     await draftEditor.getByLabel("菜谱标题").fill("测试编辑菜谱");
     await draftEditor.getByLabel("烹饪方式").selectOption("炒");
     assert.equal(await draftEditor.getByLabel("烹饪时间（分钟）").getAttribute("max"), "240");
     await draftEditor.getByLabel("烹饪时间（分钟）").fill("12");
     await draftEditor.getByLabel("食材用量 1").fill("2个");
     await draftEditor.getByLabel("烹饪步骤 1").fill("番茄切块并翻炒。");
+    await draftEditor.getByRole("button", { name: "保存草稿" }).click();
+    await draftEditor.waitFor({ state: "detached" });
+
+    const savedDraft = (await api(server, "/api/app")).payload;
+    assert.equal(savedDraft.drafts.find((item) => item.id === draft.payload.draft.id).title, "测试编辑菜谱");
+    assert.equal([...savedDraft.matches.ready, ...savedDraft.matches.missing].some((item) => item.id === draft.payload.draft.id), false);
+    await api(server, "/api/drafts/analyze", {
+      method: "POST",
+      body: { sourceType: "text", content: "《待删除草稿》番茄1个、鸡蛋2个。1.番茄切块。2.加入鸡蛋炒熟。" },
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "添加菜谱" }).click();
+    const deletingRow = page.locator(".draft-compact-row").filter({ hasText: "待删除草稿" });
+    await deletingRow.getByRole("button", { name: "删除", exact: true }).click();
+    await deletingRow.getByRole("button", { name: "取消", exact: true }).click();
+    assert.equal((await api(server, "/api/app")).payload.drafts.length, 2);
+    await deletingRow.getByRole("button", { name: "删除", exact: true }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+    await deletingRow.getByRole("button", { name: "确认删除", exact: true }).click();
+    await deletingRow.waitFor({ state: "detached" });
+    await page.reload();
+    await page.getByRole("button", { name: "添加菜谱" }).click();
+    assert.equal(await page.getByText("待删除草稿", { exact: true }).count(), 0);
+    await page.getByRole("heading", { name: "待确认草稿 (1)", exact: true }).waitFor();
+    await page.locator(".draft-compact-row").filter({ hasText: "测试编辑菜谱" }).getByRole("button", { name: "编辑", exact: true }).click();
+    assert.equal(await draftEditor.getByLabel("烹饪时间（分钟）").inputValue(), "12");
+    assert.equal(await draftEditor.getByLabel("食材用量 1").inputValue(), "2个");
+    assert.equal(await draftEditor.getByLabel("烹饪步骤 1").inputValue(), "番茄切块并翻炒。");
     await draftEditor.getByRole("button", { name: "添加食材项" }).click();
     await draftEditor.getByRole("button", { name: "确认并保存" }).click();
     assert.equal(await draftEditor.isVisible(), true);
@@ -242,7 +270,7 @@ test("家庭成员 can select ingredients for AI recipe generation via Create sh
     assert.equal(await selector.getByRole("button", { name: "选择番茄" }).getAttribute("aria-pressed"), "true");
     await selector.getByRole("button", { name: "用已选 2 种食材生成" }).click();
 
-    const editor = page.getByRole("dialog", { name: "检查菜谱草稿" });
+    const editor = page.getByRole("dialog", { name: "编辑菜谱草稿" });
     await editor.waitFor();
     assert.equal(await editor.getByLabel("菜谱标题").inputValue(), "自选番茄炒蛋");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);

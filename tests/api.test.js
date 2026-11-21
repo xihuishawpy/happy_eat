@@ -236,6 +236,8 @@ test("菜谱导入 creates 草稿 and confirming it makes it a 正式菜谱", as
     assert.equal(savedRecipe.title, "丝瓜鲜虾汤");
     assert.equal(savedRecipe.ingredients.some((item) => item.quantityLabel === "3根"), true);
     assert.equal(savedRecipe.steps.length > 0, true);
+    const deleteConfirmed = await api(server, `/api/drafts/${savedRecipe.id}`, { method: "DELETE" });
+    assert.equal(deleteConfirmed.response.status, 404);
   } finally {
     await server.stop();
   }

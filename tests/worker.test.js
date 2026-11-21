@@ -67,6 +67,19 @@ test("Cloudflare Worker supports auth, app routes, and production mutations", as
     assert.equal(saved.status, 200);
     assert.equal(saved.payload.recipe.title, "家常番茄炒蛋");
 
+    assert.equal((await callWorker(env, `/api/drafts/${recipe.id}`, { method: "DELETE" })).status, 404);
+    const analyzed = await callWorker(env, "/api/drafts/analyze", {
+      method: "POST",
+      body: { sourceType: "text", content: "《丝瓜炒蛋》丝瓜1根、鸡蛋2个。1.丝瓜切块。2.鸡蛋与丝瓜炒熟。" },
+    });
+    const draftId = analyzed.payload.draft.id;
+    const deletedDraft = await callWorker(env, `/api/drafts/${draftId}`, { method: "DELETE" });
+    assert.equal(deletedDraft.status, 200);
+    assert.deepEqual(deletedDraft.payload.drafts, []);
+    assert.equal((await callWorker(env, `/api/drafts/${draftId}/confirm`, { method: "POST" })).status, 404);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM recipe_ingredients WHERE recipe_id = ?").get(draftId).count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM recipe_steps WHERE recipe_id = ?").get(draftId).count, 0);
+
     const removed = await callWorker(env, `/api/recipes/${recipe.id}`, { method: "DELETE" });
     assert.equal(removed.status, 200);
     assert.equal(removed.payload.matches.ready.length + removed.payload.matches.missing.length, 0);
