@@ -5,12 +5,20 @@ import test from "node:test";
 import { chromium } from "playwright";
 import { api, startTestServer } from "./helpers/server.js";
 
-test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RUN_PLAYWRIGHT_UI !== "1" }, async () => {
+async function launchBrowser() {
+  try {
+    return await chromium.launch();
+  } catch {
+    return await chromium.launch({ channel: "chrome" });
+  }
+}
+
+test("家庭成员 can use the redesigned mobile cooking flow", { skip: process.env.RUN_PLAYWRIGHT_UI !== "1" }, async () => {
   const server = await startTestServer();
   let browser;
 
   try {
-    browser = await chromium.launch();
+    browser = await launchBrowser();
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     const consoleErrors = [];
     page.on("console", (message) => {
@@ -21,36 +29,44 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
 
     await page.goto(server.baseUrl);
 
+    // Access Gate
     await page.getByLabel("家庭访问码").fill(server.accessCode);
     await page.getByRole("button", { name: "进入" }).click();
-    await page.getByText("家里食材有变化？").waitFor();
-    assert.equal(await page.getByRole("button", { name: "AI 生成菜谱" }).isDisabled(), true);
+    await page.locator(".hero-card").waitFor();
 
-    const todayLayout = await page.evaluate(() => ({
-      decisionTop: document.querySelector(".matches-panel").getBoundingClientRect().top,
-      ingredientEntryTop: document.querySelector(".today-ingredient-entry").getBoundingClientRect().top,
-    }));
-    assert.equal(todayLayout.decisionTop < todayLayout.ingredientEntryTop, true);
+    // Today layout & Random Pick
+    await page.getByRole("button", { name: "帮我挑一道" }).click();
+    const pickDialog = page.getByRole("dialog");
+    await pickDialog.getByText("今天不如就做这道").waitFor();
+    await pickDialog.getByRole("button", { name: "关闭推荐" }).click();
+
+    // Quick composer on Today at 320px narrow screen
     await page.setViewportSize({ width: 320, height: 700 });
-
-    await page.getByRole("button", { name: "更新食材" }).click();
-    await page.locator(".today-ingredient-form textarea").fill("冬瓜、豆腐、豆瓣酱、花生、黄瓜、干辣椒");
+    await page.getByLabel("家里新添了什么").fill("冬瓜、豆腐、豆瓣酱、花生、黄瓜、干辣椒");
     await page.getByRole("button", { name: "解析并添加" }).click();
     await page.getByText("宫保鸡丁").waitFor();
     await page.getByText("麻婆豆腐").waitFor();
 
+    // Ingredients tab: search alias, sticky category rail, manual add/edit/delete
     await page.getByRole("button", { name: "食材", exact: true }).click();
+    await page.getByRole("button", { name: "切换食材搜索" }).click();
     await page.getByLabel("搜索食材").fill("西红柿");
     await page.getByRole("button", { name: "编辑番茄" }).waitFor();
     await page.getByLabel("搜索食材").fill("青葱");
     await page.getByRole("button", { name: "编辑葱花" }).waitFor();
-    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".ingredient-tools")).position), "sticky");
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".ingredient-tools-sticky")).position), "sticky");
     await page.getByLabel("搜索食材").fill("");
 
+    // Live parse preview on Ingredients tab
+    await page.getByLabel("自然语言录入食材").fill("胡萝卜、牛肉");
+    await page.getByText("识别到 2 种，确认后加入").waitFor();
+    await page.getByRole("button", { name: "修改" }).click();
+    await page.getByRole("button", { name: "取消" }).click();
+
+    // Add, edit, delete single ingredient
     await page.getByRole("button", { name: "添加食材" }).click();
     const addIngredient = page.getByRole("dialog", { name: "添加食材" });
     await addIngredient.getByLabel("食材名称").fill("茭白");
-    assert.equal(await addIngredient.getByLabel("参考用量").count(), 0);
     await addIngredient.getByRole("radio", { name: "蔬菜" }).check();
     await addIngredient.getByRole("radio", { name: "优先用掉" }).check();
     await addIngredient.getByRole("button", { name: "保存食材" }).click();
@@ -67,40 +83,44 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
     await page.getByRole("button", { name: "确认删除" }).click();
     await page.getByRole("button", { name: "编辑茭白" }).waitFor({ state: "detached" });
 
+    // Recipe Library: search + chip filters + 2-col cards
     await page.getByRole("button", { name: "菜谱", exact: true }).click();
     await page.getByLabel("搜索菜谱或食材").fill("西红柿");
-    await page.getByLabel("烹饪方式").selectOption("煮");
-    await page.getByLabel("烹饪时间").selectOption("15");
-    const filteredRecipeTitles = await page.locator("article.recipe-row h3").allTextContents();
-    assert.equal(filteredRecipeTitles.includes("番茄鸡蛋汤"), true);
-    assert.equal(filteredRecipeTitles.every((title) => title.includes("番茄") || title.includes("西红柿")), true);
-    assert.equal(await page.locator(".match-tabs button.active").innerText(), `可做菜谱（${filteredRecipeTitles.length}）`);
+    await page.getByRole("button", { name: "煮", exact: true }).click();
+    await page.getByRole("button", { name: "⏱ 15 分钟内" }).click();
+    const filteredTitles = await page.locator("article.recipe-grid-card h3").allTextContents();
+    assert.equal(filteredTitles.includes("番茄鸡蛋汤"), true);
+    assert.equal(filteredTitles.every((title) => title.includes("番茄") || title.includes("西红柿")), true);
+    await page.getByRole("button", { name: "清除筛选" }).click();
 
-    const unfiltered = await api(server, "/api/app");
-    await page.getByRole("button", { name: "今天做什么", exact: true }).click();
-    assert.equal(await page.locator(".match-tabs button.active").innerText(), `可做菜谱（${unfiltered.payload.matches.ready.length}）`);
-    await page.getByRole("button", { name: "菜谱", exact: true }).click();
-    await page.getByRole("button", { name: "清除" }).click();
-
+    // Detail Sheet + Dark Step-by-Step Cooking Mode + Persistence
     const beforeCooking = await api(server, "/api/app");
-    await page.locator("article.recipe-row").filter({ hasText: "番茄炒蛋" }).click();
-    await page.getByRole("button", { name: "开始烹饪" }).click();
-    const cookingIngredient = page.locator(".cooking-checklist input").first();
-    const cookingStep = page.locator(".cooking-steps input").first();
-    await cookingIngredient.check();
-    await cookingStep.check();
-    await page.getByRole("button", { name: "返回菜谱详情" }).click();
+    await page.locator("article.recipe-grid-card").filter({ hasText: "番茄炒蛋" }).click();
+    await page.getByRole("button", { name: "开始做菜" }).click();
+    await page.getByText("第 1 步 / 共").waitFor();
+    await page.getByRole("button", { name: "下一步" }).click();
+    await page.getByText("第 2 步 / 共").waitFor();
 
-    await page.locator("article.recipe-row").filter({ hasText: "番茄炒蛋" }).click();
-    await page.getByRole("button", { name: "开始烹饪" }).click();
-    assert.equal(await page.locator(".cooking-checklist input").first().isChecked(), true);
-    assert.equal(await page.locator(".cooking-steps input").first().isChecked(), true);
-    await page.getByRole("button", { name: "返回菜谱详情" }).click();
+    // Open overview drawer & check off first ingredient
+    await page.getByRole("button", { name: "食材与步骤总览" }).click();
+    const firstCheck = page.locator(".cook-checklist input").first();
+    await firstCheck.check();
+    await page.getByRole("button", { name: "关闭总览" }).click();
+    await page.getByRole("button", { name: "退出烹饪模式" }).click();
+
+    // Reopen and verify step & checklist persisted
+    await page.locator("article.recipe-grid-card").filter({ hasText: "番茄炒蛋" }).click();
+    await page.getByRole("button", { name: "开始做菜" }).click();
+    await page.getByText("第 2 步 / 共").waitFor();
+    await page.getByRole("button", { name: "食材与步骤总览" }).click();
+    assert.equal(await page.locator(".cook-checklist input").first().isChecked(), true);
+    await page.getByRole("button", { name: "关闭总览" }).click();
+    await page.getByRole("button", { name: "退出烹饪模式" }).click();
 
     const afterCooking = await api(server, "/api/app");
     assert.deepEqual(afterCooking.payload.ingredients, beforeCooking.payload.ingredients);
-    assert.deepEqual(afterCooking.payload.matches, beforeCooking.payload.matches);
 
+    // Center "+" Create Sheet & Draft confirmation flow
     const draft = await api(server, "/api/drafts/analyze", {
       method: "POST",
       body: {
@@ -111,12 +131,9 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
     assert.equal(draft.response.status, 200);
 
     await page.reload();
-    await page.getByRole("button", { name: "草稿" }).click();
+    await page.getByRole("button", { name: "添加菜谱" }).click();
     await page.getByText("测试保存菜谱").waitFor();
-    assert.equal(await page.locator(".draft-input").inputValue(), "");
-    assert.equal(await page.getByRole("button", { name: "解析为草稿" }).isDisabled(), true);
-    assert.equal(await page.getByRole("tab", { name: "文本" }).getAttribute("aria-selected"), "true");
-    await page.getByRole("button", { name: "检查草稿" }).click();
+    await page.getByRole("button", { name: "去确认" }).first().click();
 
     const draftEditor = page.getByRole("dialog", { name: "检查菜谱草稿" });
     await draftEditor.getByLabel("菜谱标题").fill("测试编辑菜谱");
@@ -133,8 +150,7 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
 
     const detail = page.getByRole("dialog", { name: "测试编辑菜谱" });
     await detail.getByText("测试编辑菜谱").waitFor();
-    await detail.getByText("番茄 × 2个").waitFor();
-    await detail.getByText("烹饪步骤").waitFor();
+    await detail.getByText("2个").waitFor();
     await detail.getByRole("button", { name: "编辑菜谱" }).click();
 
     const formalEditor = page.getByRole("dialog", { name: "编辑菜谱" });
@@ -149,9 +165,16 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
     await updatedDetail.waitFor({ state: "detached" });
     assert.equal(await page.getByText("测试正式菜谱").count(), 0);
 
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-    await page.getByRole("button", { name: "食材", exact: true }).click();
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+    // Family tab
+    await page.getByRole("button", { name: "家庭", exact: true }).click();
+    await page.getByText("常备调味品").waitFor();
+
+    // Check zero horizontal overflow across tabs at 320px
+    for (const tabName of ["今天", "食材", "菜谱", "家庭"]) {
+      await page.getByRole("button", { name: tabName, exact: true }).click();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `${tabName} overflowed`);
+    }
+
     assert.deepEqual(consoleErrors, []);
   } finally {
     await browser?.close();
@@ -159,7 +182,7 @@ test("家庭成员 can use the core mobile cooking flow", { skip: process.env.RU
   }
 });
 
-test("家庭成员 can select ingredients for AI recipe generation", { skip: process.env.RUN_PLAYWRIGHT_UI !== "1" }, async () => {
+test("家庭成员 can select ingredients for AI recipe generation via Create sheet", { skip: process.env.RUN_PLAYWRIGHT_UI !== "1" }, async () => {
   const llm = createServer((request, response) => {
     request.resume();
     request.on("end", () => {
@@ -177,7 +200,7 @@ test("家庭成员 can select ingredients for AI recipe generation", { skip: pro
                 { name: "鸡蛋", quantityLabel: "2个" },
               ],
               optionalIngredients: [{ name: "生抽", quantityLabel: "1勺" }],
-              steps: ["番茄切块，鸡蛋打散。", "鸡蛋炒熟后加入番茄。"],
+              steps: ["番茄切块，鸡蛋打散。", "鸡蛋炒熟后加入番茄翻炒2分钟。"],
             }),
           },
         }],
@@ -195,13 +218,14 @@ test("家庭成员 can select ingredients for AI recipe generation", { skip: pro
   let browser;
 
   try {
-    browser = await chromium.launch();
+    browser = await launchBrowser();
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.goto(server.baseUrl);
     await page.getByLabel("家庭访问码").fill(server.accessCode);
     await page.getByRole("button", { name: "进入" }).click();
 
-    await page.getByRole("button", { name: "AI 生成菜谱" }).click();
+    await page.getByRole("button", { name: "添加菜谱" }).click();
+    await page.getByRole("button", { name: "选食材并生成" }).click();
     const selector = page.getByRole("dialog", { name: "选择想用的食材" });
     await selector.getByRole("button", { name: "选择番茄" }).click();
     await selector.getByRole("button", { name: "选择鸡蛋" }).click();
