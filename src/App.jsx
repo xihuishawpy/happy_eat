@@ -25,7 +25,10 @@ import {
   RotateCcw,
   Save,
   Search,
+  ShieldAlert,
+  ShieldCheck,
   ShoppingBasket,
+  ShoppingCart,
   Sparkles,
   Square,
   Timer,
@@ -34,6 +37,17 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  PREGNANCY_DISCLAIMER,
+  evaluateIngredientPregnancy,
+} from "../shared/pregnancy.js";
+import {
+  MealPlannerSheet,
+  PregnancyAlertBanner,
+  PregnancyBadge,
+  PregnancyInfoBox,
+  ShoppingPlanCard,
+} from "./MealPlannerAndPregnancy.jsx";
 import {
   CATEGORY_EMOJI,
   INGREDIENT_CATEGORIES,
@@ -110,9 +124,12 @@ export default function App() {
   const [cookingRecipe, setCookingRecipe] = useState(null);
   const [ingredientEditor, setIngredientEditor] = useState(null);
   const [generationSelectorOpen, setGenerationSelectorOpen] = useState(false);
+  const [mealPlannerMode, setMealPlannerMode] = useState(null); // null | "use_existing" | "shopping_plan"
+  const [creatingManualRecipe, setCreatingManualRecipe] = useState(false);
   const [draftEditor, setDraftEditor] = useState(null);
   const [recipeEditor, setRecipeEditor] = useState(null);
   const [completionNotice, setCompletionNotice] = useState(null);
+  const [pregnancyAlert, setPregnancyAlert] = useState(null);
 
   // Request status
   const [pendingAction, setPendingAction] = useState("");
@@ -154,6 +171,12 @@ export default function App() {
       setMatchTab("missing");
     }
   }, [app]);
+
+  useEffect(() => {
+    if (!completionNotice || completionNotice.undoId) return undefined;
+    const timer = setTimeout(() => setCompletionNotice(null), 4500);
+    return () => clearTimeout(timer);
+  }, [completionNotice]);
 
   const handleBatchTextChange = (nextText, { openPreview = false, origin = "manual" } = {}) => {
     setBatchText(nextText);
@@ -217,6 +240,8 @@ export default function App() {
     );
   }
 
+  const settings = app.settings || { pregnancyMode: true, dietaryNotes: "", defaultMealStyle: "2菜+主食" };
+  const pregnancyMode = Boolean(settings.pregnancyMode);
   const kitchenName = app.family.name === "张家" ? "小张张的幸福厨房" : `${app.family.name}厨房`;
   const allRecipes = [...app.matches.ready, ...app.matches.missing];
   const recipeMethods = [...new Set(allRecipes.map((recipe) => recipe.method))];
@@ -271,6 +296,26 @@ export default function App() {
     }
   }
 
+  function notifyAddedIngredients(addedIngredients, nextSettings, fallbackMessage) {
+    const list = Array.isArray(addedIngredients) ? addedIngredients : [];
+    const activePregnancy = nextSettings ? Boolean(nextSettings.pregnancyMode) : pregnancyMode;
+    if (!activePregnancy || list.length === 0) {
+      setCompletionNotice({ message: fallbackMessage, undoId: null });
+      return;
+    }
+    const hasFlagged = list.some((item) => item.pregnancyLevel && item.pregnancyLevel !== "safe");
+    if (hasFlagged) {
+      setPregnancyAlert({ items: list });
+      setCompletionNotice({ message: fallbackMessage, undoId: null });
+    } else {
+      setPregnancyAlert(null);
+      setCompletionNotice({
+        message: `${fallbackMessage} · 新增 ${list.length} 种均适合孕期食用 🤰`,
+        undoId: null,
+      });
+    }
+  }
+
   async function addBatchIngredients(overrideText) {
     const raw = typeof overrideText === "string" ? overrideText : batchText;
     const submitText =
@@ -299,7 +344,7 @@ export default function App() {
       setExcludedPreviewNames([]);
       setBatchPreviewOpen(false);
       setBatchInputOrigin("manual");
-      setCompletionNotice({ message: "食材清单已更新，菜谱已重新匹配", undoId: null });
+      notifyAddedIngredients(nextApp.addedIngredients, nextApp.settings, "食材清单已更新，菜谱已重新匹配");
       setSyncState("synced");
     } catch (err) {
       setError(err.message);
@@ -330,18 +375,20 @@ export default function App() {
     setSyncState("syncing");
     setError("");
     try {
-      setApp(
-        await api(editing ? `/api/ingredients/${ingredient.id}` : "/api/ingredients", {
-          token,
-          method: editing ? "PATCH" : "POST",
-          body: {
-            name: ingredient.name,
-            category: ingredient.category,
-            state: ingredient.state,
-          },
-        }),
-      );
+      const nextApp = await api(editing ? `/api/ingredients/${ingredient.id}` : "/api/ingredients", {
+        token,
+        method: editing ? "PATCH" : "POST",
+        body: {
+          name: ingredient.name,
+          category: ingredient.category,
+          state: ingredient.state,
+        },
+      });
+      setApp(nextApp);
       setIngredientEditor(null);
+      if (!editing) {
+        notifyAddedIngredients(nextApp.addedIngredients, nextApp.settings, `已添加「${ingredient.name}」`);
+      }
       setSyncState("synced");
     } catch (err) {
       setError(err.message);
@@ -349,6 +396,282 @@ export default function App() {
     } finally {
       setPendingAction("");
     }
+  }
+
+  async function updateFamilySettings(patch) {
+    setPendingAction("settings-save");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const nextApp = await api("/api/settings", {
+        token,
+        method: "PATCH",
+        body: patch,
+      });
+      setApp(nextApp);
+      setCompletionNotice({ message: "家庭饮食设置已同步", undoId: null });
+      setSyncState("synced");
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function suggestMealPlan(options) {
+    setSyncState("syncing");
+    setError("");
+    try {
+      const result = await api("/api/meal-plan/suggest", {
+        token,
+        method: "POST",
+        body: options,
+      });
+      setSyncState("synced");
+      return result.plan;
+    } catch (err) {
+      setSyncState("error");
+      throw err;
+    }
+  }
+
+  async function createManualRecipe(recipePayload) {
+    setPendingAction("recipe-create");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const result = await api("/api/recipes", {
+        token,
+        method: "POST",
+        body: { ...recipePayload, status: "formal", sourceType: recipePayload.sourceType || "manual" },
+      });
+      setApp(result.app);
+      setCreatingManualRecipe(false);
+      setCreateSheetOpen(false);
+      if (result.recipe) {
+        setSelectedRecipe(result.recipe);
+      }
+      setCompletionNotice({ message: `已保存菜谱「${recipePayload.title}」`, undoId: null });
+      setSyncState("synced");
+      return result.recipe;
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+      throw err;
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function saveSuggestedMealToLibrary(meal) {
+    setPendingAction("recipe-create");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const result = await api("/api/recipes", {
+        token,
+        method: "POST",
+        body: {
+          title: meal.title,
+          method: meal.method,
+          minutes: meal.minutes,
+          preferenceWarning: meal.preferenceWarning || "",
+          status: "formal",
+          sourceType: "planned",
+          sourceText: meal.reason || "",
+          ingredients: meal.ingredients,
+          steps: meal.steps.map((s) => (typeof s === "string" ? s : s.text)),
+        },
+      });
+      setApp(result.app);
+      setCompletionNotice({ message: `已收藏「${meal.title}」到菜谱库`, undoId: null });
+      setSyncState("synced");
+      return result.recipe;
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+      throw err;
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function saveShoppingPlan(nextPlan) {
+    setPendingAction("shopping-save");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const nextApp = await api("/api/shopping-plan", {
+        token,
+        method: "PUT",
+        body: nextPlan ? nextPlan : { clear: true },
+      });
+      setApp(nextApp);
+      setSyncState("synced");
+      return nextApp;
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+      throw err;
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function addMissingToShoppingList(recipe) {
+    const missing = recipe?.missing || [];
+    if (missing.length === 0) return;
+    const current = app.shoppingPlan || {
+      title: "家庭买菜清单",
+      summary: "",
+      staple: "",
+      meals: [],
+      items: [],
+    };
+    const nextItems = [...(current.items || [])];
+    for (const name of missing) {
+      const existing = nextItems.find((item) => item.name === name);
+      if (existing) {
+        const dishes = new Set([...(existing.forDishes || []), recipe.title]);
+        existing.forDishes = [...dishes];
+      } else {
+        const preg = evaluateIngredientPregnancy(name);
+        const matchedIng = recipe.ingredients.find((i) => i.name === name);
+        nextItems.push({
+          id: `shop-${Date.now()}-${name}`,
+          name,
+          category: "其他",
+          quantityLabel: matchedIng?.quantityLabel || "适量",
+          checked: false,
+          forDishes: [recipe.title],
+          pregnancyLevel: preg.level,
+          pregnancyNote: preg.note,
+        });
+      }
+    }
+    const nextMeals = [...(current.meals || [])];
+    if (!nextMeals.some((m) => m.title === recipe.title)) {
+      nextMeals.push({
+        title: recipe.title,
+        method: recipe.method,
+        minutes: recipe.minutes,
+        reason: "自家菜谱补齐缺料",
+        ingredients: recipe.ingredients,
+        steps: recipe.steps,
+      });
+    }
+    await saveShoppingPlan({ ...current, items: nextItems, meals: nextMeals });
+    setCompletionNotice({ message: `已将 ${missing.join("、")} 加入买菜清单`, undoId: null });
+  }
+
+  async function addManualShoppingItem(rawName) {
+    const name = String(rawName || "").trim();
+    if (!name) return;
+    const current = app.shoppingPlan || {
+      title: "家庭买菜清单",
+      summary: "",
+      staple: "",
+      meals: [],
+      items: [],
+    };
+    const items = [...(current.items || [])];
+    if (items.some((item) => item.name === name)) {
+      setCompletionNotice({ message: `「${name}」已在买菜清单中`, undoId: null });
+      return;
+    }
+    const preg = evaluateIngredientPregnancy(name);
+    items.push({
+      id: `shop-${Date.now()}-${name}`,
+      name,
+      category: "其他",
+      quantityLabel: "",
+      checked: false,
+      forDishes: ["手动添加"],
+      pregnancyLevel: preg.level,
+      pregnancyNote: preg.note,
+    });
+    await saveShoppingPlan({ ...current, items });
+    if (pregnancyMode && (preg.level === "avoid" || preg.level === "caution")) {
+      setPregnancyAlert({
+        items: [{ name, category: "其他", pregnancyLevel: preg.level, pregnancyNote: preg.note }],
+      });
+    }
+  }
+
+  async function toggleShoppingItem(id) {
+    if (!app.shoppingPlan) return;
+    const previousPlan = app.shoppingPlan;
+    const nextPlan = {
+      ...previousPlan,
+      items: (previousPlan.items || []).map((item) =>
+        item.id === id ? { ...item, checked: !item.checked } : item,
+      ),
+    };
+    setApp((current) => (current ? { ...current, shoppingPlan: nextPlan } : current));
+    try {
+      await saveShoppingPlan(nextPlan);
+    } catch {
+      setApp((current) => (current ? { ...current, shoppingPlan: previousPlan } : current));
+    }
+  }
+
+  async function removeShoppingItem(id) {
+    if (!app.shoppingPlan) return;
+    const nextItems = (app.shoppingPlan.items || []).filter((item) => item.id !== id);
+    await saveShoppingPlan(nextItems.length === 0 ? null : { ...app.shoppingPlan, items: nextItems });
+  }
+
+  async function commitShoppingPlan({ saveMeals = true } = {}) {
+    setPendingAction("shopping-commit");
+    setSyncState("syncing");
+    setError("");
+    try {
+      const result = await api("/api/shopping-plan/commit", {
+        token,
+        method: "POST",
+        body: { saveMeals },
+      });
+      setApp(result);
+      const count = (result.addedIngredients || []).length;
+      const savedCount = (result.savedRecipeIds || []).length;
+      const msg = savedCount > 0
+        ? `已入库 ${count} 种食材，并收藏 ${savedCount} 道推荐菜`
+        : `已入库 ${count} 种买回的食材，菜谱已更新`;
+      notifyAddedIngredients(result.addedIngredients, result.settings, msg);
+      setSyncState("synced");
+    } catch (err) {
+      setError(err.message);
+      setSyncState("error");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  function startCookingSuggestedMeal(meal) {
+    const existing = allRecipes.find((r) => r.id === meal.existingRecipeId || r.title === meal.title);
+    if (existing) {
+      setCookingRecipe(existing);
+      setCompletionNotice(null);
+      setError("");
+      return;
+    }
+    setCookingRecipe({
+      id: `temp-${meal.title}`,
+      isTemporary: true,
+      title: meal.title,
+      method: meal.method || "炒",
+      minutes: meal.minutes || 20,
+      preferenceWarning: meal.preferenceWarning || "",
+      reason: meal.reason || "",
+      ingredients: meal.ingredients || [],
+      steps: (meal.steps || []).map((s, idx) => ({
+        position: s.position || idx + 1,
+        text: typeof s === "string" ? s : s.text,
+      })),
+    });
+    setCompletionNotice(null);
+    setError("");
   }
 
   async function removeIngredient(id) {
@@ -528,12 +851,69 @@ export default function App() {
     }
   }
 
-  async function completeCooking(recipe, consumptions) {
+  async function completeCooking(recipe, consumptions, { saveTempRecipe = false } = {}) {
     setPendingAction("cooking-complete");
     setSyncState("syncing");
     setError("");
     try {
-      const result = await api(`/api/recipes/${recipe.id}/complete`, {
+      let targetRecipeId = recipe.id;
+      if (recipe.isTemporary) {
+        if (saveTempRecipe) {
+          const created = await api("/api/recipes", {
+            token,
+            method: "POST",
+            body: {
+              title: recipe.title,
+              method: recipe.method,
+              minutes: recipe.minutes,
+              preferenceWarning: recipe.preferenceWarning || "",
+              status: "formal",
+              sourceType: "planned",
+              sourceText: recipe.reason || "",
+              ingredients: recipe.ingredients,
+              steps: recipe.steps.map((s) => s.text),
+            },
+          });
+          setApp(created.app);
+          targetRecipeId = created.recipe?.id;
+        } else {
+          // Apply consumption updates directly to matching inventory items
+          let latestApp = app;
+          let removed = 0;
+          let prioritized = 0;
+          for (const item of consumptions || []) {
+            if (item.action === "kept") continue;
+            const found = (latestApp?.ingredients || []).find((ing) => ing.name === item.name);
+            if (!found) continue;
+            if (item.action === "used_up") {
+              latestApp = await api(`/api/ingredients/${found.id}`, { token, method: "DELETE" });
+              removed += 1;
+            } else if (found.state !== "priority") {
+              latestApp = await api(`/api/ingredients/${found.id}`, {
+                token,
+                method: "PATCH",
+                body: { state: "priority" },
+              });
+              prioritized += 1;
+            }
+          }
+          setApp(latestApp);
+          setCookingRecipe(null);
+          setSelectedRecipe(null);
+          sessionStorage.removeItem(`happy-eat-cooking-${recipe.id}`);
+          const changes = [];
+          if (removed > 0) changes.push(`移除 ${removed} 项`);
+          if (prioritized > 0) changes.push(`${prioritized} 项标为优先`);
+          setCompletionNotice({
+            message: changes.length > 0 ? `食材已更新：${changes.join("，")}` : "已完成烹饪，开饭啦！",
+            undoId: null,
+          });
+          setSyncState("synced");
+          return;
+        }
+      }
+
+      const result = await api(`/api/recipes/${targetRecipeId}/complete`, {
         token,
         method: "POST",
         body: { consumptions },
@@ -546,7 +926,11 @@ export default function App() {
       setSelectedRecipe(null);
       sessionStorage.removeItem(`happy-eat-cooking-${recipe.id}`);
       setCompletionNotice({
-        message: changes.length > 0 ? `食材已更新：${changes.join("，")}` : "已完成烹饪，食材清单没有变化",
+        message: changes.length > 0
+          ? `${saveTempRecipe ? "已收藏菜谱并更新食材：" : "食材已更新："}${changes.join("，")}`
+          : saveTempRecipe
+            ? "已完成烹饪，并已收藏到菜谱库"
+            : "已完成烹饪，食材清单没有变化",
         undoId: result.undoId,
       });
       setSyncState("synced");
@@ -617,12 +1001,18 @@ export default function App() {
           跳到主要内容
         </a>
 
-        {error && !ingredientEditor && !createSheetOpen && !draftEditor && !recipeEditor && !selectedRecipe && !cookingRecipe && (
+        {error && !ingredientEditor && !createSheetOpen && !draftEditor && !recipeEditor && !creatingManualRecipe && !mealPlannerMode && !selectedRecipe && !cookingRecipe && (
           <div className="floating-banner error" role="alert">
             <span>{error}</span>
             <button type="button" onClick={() => setError("")} aria-label="关闭错误提示">
               <X size={16} />
             </button>
+          </div>
+        )}
+
+        {pregnancyAlert && (
+          <div className="preg-alert-slot">
+            <PregnancyAlertBanner alert={pregnancyAlert} onClose={() => setPregnancyAlert(null)} />
           </div>
         )}
 
@@ -666,31 +1056,124 @@ export default function App() {
               </header>
 
               {/* Hero Card */}
-              <section className="hero-card" aria-label="今日可做概览">
+              <section className={`hero-card ${app.matches.ready.length === 0 ? "is-empty-fridge" : ""}`} aria-label="今日可做概览">
                 <div className="hero-content">
-                  <div className="hero-label">家里食材现在就能做</div>
-                  <div className="hero-number">
-                    <strong>{app.matches.ready.length}</strong>
-                    <span>道菜</span>
-                  </div>
-                  <div className="hero-stat">
-                    {app.ingredients.length} 种食材
-                    {app.matches.missing.length > 0 ? ` · 另有 ${app.matches.missing.length} 道差少许食材` : " · 菜谱全部齐全"}
-                  </div>
-                  <button
-                    className="hero-pick-btn"
-                    type="button"
-                    onClick={() => pickRandomRecipe()}
-                    disabled={allRecipes.length === 0}
-                  >
-                    <Dice5 size={16} aria-hidden="true" />
-                    <span>帮我挑一道</span>
-                  </button>
+                  {app.matches.ready.length > 0 ? (
+                    <>
+                      <div className="hero-label">
+                        家里食材现在就能做{pregnancyMode ? " · 🤰 孕期守护中" : ""}
+                      </div>
+                      <div className="hero-number">
+                        <strong>{app.matches.ready.length}</strong>
+                        <span>道菜</span>
+                      </div>
+                      <div className="hero-stat">
+                        {app.ingredients.length} 种食材
+                        {app.matches.missing.length > 0 ? ` · 另有 ${app.matches.missing.length} 道差少许食材` : " · 菜谱全部齐全"}
+                      </div>
+                      <div className="hero-btn-group">
+                        <button
+                          className="hero-pick-btn primary-hero"
+                          type="button"
+                          onClick={() => {
+                            setError("");
+                            setMealPlannerMode("use_existing");
+                          }}
+                        >
+                          <Sparkles size={16} aria-hidden="true" />
+                          <span>帮我想吃什么</span>
+                        </button>
+                        <button
+                          className="hero-pick-btn"
+                          type="button"
+                          onClick={() => pickRandomRecipe()}
+                          disabled={allRecipes.length === 0}
+                        >
+                          <Dice5 size={15} aria-hidden="true" />
+                          <span>帮我挑一道</span>
+                        </button>
+                        <button
+                          className="hero-pick-btn"
+                          type="button"
+                          onClick={() => {
+                            setError("");
+                            setMealPlannerMode("shopping_plan");
+                          }}
+                        >
+                          <ShoppingCart size={15} aria-hidden="true" />
+                          <span>规划买菜</span>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="hero-label">
+                        冰箱快空啦{pregnancyMode ? " · 🤰 孕期守护中" : ""}
+                      </div>
+                      <div className="hero-empty-title">不知道买什么菜？</div>
+                      <div className="hero-stat">
+                        当前 {app.ingredients.length} 种食材 · 帮你规划下顿 2 道菜 + 主食与买菜清单
+                      </div>
+                      <div className="hero-btn-group">
+                        <button
+                          className="hero-pick-btn primary-hero"
+                          type="button"
+                          onClick={() => {
+                            setError("");
+                            setMealPlannerMode("shopping_plan");
+                          }}
+                        >
+                          <ShoppingCart size={16} aria-hidden="true" />
+                          <span>规划买菜与菜单</span>
+                        </button>
+                        <button
+                          className="hero-pick-btn"
+                          type="button"
+                          onClick={() => {
+                            setError("");
+                            setMealPlannerMode("use_existing");
+                          }}
+                        >
+                          <Sparkles size={15} aria-hidden="true" />
+                          <span>帮我想吃什么</span>
+                        </button>
+                        {allRecipes.length > 0 && (
+                          <button
+                            className="hero-pick-btn"
+                            type="button"
+                            onClick={() => pickRandomRecipe()}
+                          >
+                            <Dice5 size={15} aria-hidden="true" />
+                            <span>帮我挑一道</span>
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="hero-deco" aria-hidden="true">
-                  🍳
+                  {app.matches.ready.length === 0 ? "🛒" : "🍳"}
                 </div>
               </section>
+
+              {/* Shared Family Shopping Plan Card */}
+              {app.shoppingPlan && (
+                <ShoppingPlanCard
+                  plan={app.shoppingPlan}
+                  pregnancyMode={pregnancyMode}
+                  busy={busy}
+                  onToggleItem={toggleShoppingItem}
+                  onRemoveItem={removeShoppingItem}
+                  onAddManualItem={addManualShoppingItem}
+                  onCommit={commitShoppingPlan}
+                  onClear={() => saveShoppingPlan(null)}
+                  onOpenPlanner={() => {
+                    setError("");
+                    setMealPlannerMode("shopping_plan");
+                  }}
+                  onCookMeal={startCookingSuggestedMeal}
+                />
+              )}
 
               {/* Priority / Expiring Strip */}
               {urgentIngredients.length > 0 && (
@@ -853,18 +1336,20 @@ export default function App() {
                 <TodayRecipeList
                   recipes={todayVisibleRecipes}
                   urgentNameSet={urgentNameSet}
+                  pregnancyMode={pregnancyMode}
+                  busy={busy}
                   onOpen={setSelectedRecipe}
+                  onAddMissingToShopping={addMissingToShoppingList}
                   emptyMessage={
                     todayIngredientFilter
                       ? `暂无含「${todayIngredientFilter}」的${matchTab === "ready" ? "可做" : "待补"}菜谱`
                       : matchTab === "ready"
-                        ? "当前还没有可立刻做的菜，添几样食材或让 AI 帮你想一道吧。"
+                        ? "当前还没有可立刻做的菜，试试「帮我想吃什么」或「规划买菜」吧。"
                         : "目前没有差一点就能做的菜谱。"
                   }
                   onQuickAction={() => {
                     setError("");
-                    setCreateNotice("");
-                    setCreateSheetOpen(true);
+                    setMealPlannerMode(matchTab === "ready" ? "use_existing" : "shopping_plan");
                   }}
                 />
               </div>
@@ -1036,26 +1521,73 @@ export default function App() {
                     </div>
                     {batchPreviewItems.length > 0 && (
                       <div className="parse-chip-list">
-                        {batchPreviewItems.map((item) => (
-                          <span key={item.name} className="parse-chip">
-                            <span aria-hidden="true">{item.emoji}</span>
-                            <strong>{item.name}</strong>
-                            <small>{item.category}</small>
-                            {item.state !== "none" && (
-                              <em className={`mini-state ${item.state}`}>{stateShortLabels[item.state]}</em>
-                            )}
-                            <button
-                              type="button"
-                              className="parse-chip-remove"
-                              onClick={() => setExcludedPreviewNames((prev) => [...prev, item.name])}
-                              aria-label={`移除预览食材${item.name}`}
+                        {batchPreviewItems.map((item) => {
+                          const preg = pregnancyMode ? evaluateIngredientPregnancy(item.name) : null;
+                          const flagged = preg && (preg.level === "avoid" || preg.level === "caution");
+                          return (
+                            <span
+                              key={item.name}
+                              className={`parse-chip ${flagged ? `preg-border-${preg.level}` : ""}`}
                             >
-                              <X size={12} />
-                            </button>
-                          </span>
-                        ))}
+                              <span aria-hidden="true">{item.emoji}</span>
+                              <strong>{item.name}</strong>
+                              <small>{item.category}</small>
+                              {item.state !== "none" && (
+                                <em className={`mini-state ${item.state}`}>{stateShortLabels[item.state]}</em>
+                              )}
+                              {flagged && <PregnancyBadge level={preg.level} compact />}
+                              <button
+                                type="button"
+                                className="parse-chip-remove"
+                                onClick={() => setExcludedPreviewNames((prev) => [...prev, item.name])}
+                                aria-label={`移除预览食材${item.name}`}
+                              >
+                                <X size={12} />
+                              </button>
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
+                    {pregnancyMode && batchPreviewItems.length > 0 && (() => {
+                      const evaluated = batchPreviewItems.map((item) => ({
+                        ...item,
+                        preg: evaluateIngredientPregnancy(item.name),
+                      }));
+                      const flagged = evaluated.filter((item) => item.preg.level === "avoid" || item.preg.level === "caution");
+                      const unknowns = evaluated.filter((item) => item.preg.level === "unknown");
+                      if (flagged.length > 0) {
+                        const sev = flagged.some((item) => item.preg.level === "avoid") ? "avoid" : "caution";
+                        return (
+                          <div className={`preview-preg-summary preg-${sev}`}>
+                            <div className="preview-preg-title">
+                              <ShieldAlert size={14} aria-hidden="true" />
+                              <span>孕期提醒：以下食材需注意</span>
+                            </div>
+                            <ul>
+                              {flagged.map((item) => (
+                                <li key={item.name}>
+                                  <strong>{item.name}</strong>（{item.preg.label}）：{item.preg.note}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        );
+                      }
+                      if (unknowns.length > 0) {
+                        return (
+                          <div className="preview-preg-summary preg-unknown">
+                            <span>🤰 加入后系统将自动评估「{unknowns.map((i) => i.name).join("、")}」的孕期适用性</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="preview-preg-summary preg-safe">
+                          <ShieldCheck size={14} aria-hidden="true" />
+                          <span>本次识别的 {batchPreviewItems.length} 种食材均适合孕期食用</span>
+                        </div>
+                      );
+                    })()}
                     <div className="parse-actions">
                       <button
                         type="button"
@@ -1109,7 +1641,13 @@ export default function App() {
                       </div>
                       <div className="tile-grid">
                         {specialStateIngredients.map((item) => (
-                          <IngredientTile key={item.id} ingredient={item} onEdit={() => openIngredient(item)} disabled={busy} />
+                          <IngredientTile
+                            key={item.id}
+                            ingredient={item}
+                            pregnancyMode={pregnancyMode}
+                            onEdit={() => openIngredient(item)}
+                            disabled={busy}
+                          />
                         ))}
                       </div>
                     </section>
@@ -1130,7 +1668,13 @@ export default function App() {
                         </div>
                         <div className="tile-grid">
                           {items.map((item) => (
-                            <IngredientTile key={item.id} ingredient={item} onEdit={() => openIngredient(item)} disabled={busy} />
+                            <IngredientTile
+                              key={item.id}
+                              ingredient={item}
+                              pregnancyMode={pregnancyMode}
+                              onEdit={() => openIngredient(item)}
+                              disabled={busy}
+                            />
                           ))}
                         </div>
                       </section>
@@ -1141,7 +1685,13 @@ export default function App() {
                 <section className="tile-section" aria-label="筛选后的食材">
                   <div className="tile-grid">
                     {visibleIngredients.map((item) => (
-                      <IngredientTile key={item.id} ingredient={item} onEdit={() => openIngredient(item)} disabled={busy} />
+                      <IngredientTile
+                        key={item.id}
+                        ingredient={item}
+                        pregnancyMode={pregnancyMode}
+                        onEdit={() => openIngredient(item)}
+                        disabled={busy}
+                      />
                     ))}
                   </div>
                 </section>
@@ -1280,6 +1830,11 @@ export default function App() {
                           <span className={`tag-pill ${isReady ? "tag-green" : "tag-orange"}`}>
                             {isReady ? "能做" : `缺 ${recipe.missing.length} 样`}
                           </span>
+                          {pregnancyMode && recipe.pregnancyWarning?.level === "avoid" && (
+                            <span className="cover-preg-dot" title={recipe.pregnancyWarning.summary} aria-label="孕期避免提醒">
+                              🤰
+                            </span>
+                          )}
                           {recipe.usesPriority && (
                             <span className="cover-priority-dot" title="会用到优先处理食材" aria-label="用到优先食材">
                               <Flame size={12} />
@@ -1317,6 +1872,7 @@ export default function App() {
               syncState={syncState}
               busy={busy}
               onRefresh={refresh}
+              onUpdateSettings={updateFamilySettings}
               onOpenCreate={() => {
                 setError("");
                 setCreateNotice("");
@@ -1412,6 +1968,26 @@ export default function App() {
           />
         )}
 
+        {/* Meal Planner & Shopping Plan Sheet */}
+        {mealPlannerMode && (
+          <MealPlannerSheet
+            initialMode={mealPlannerMode}
+            app={app}
+            busy={busy}
+            onSuggest={suggestMealPlan}
+            onCookMeal={startCookingSuggestedMeal}
+            onSaveMealToLibrary={saveSuggestedMealToLibrary}
+            onApplyShoppingPlan={async (nextPlan) => {
+              await saveShoppingPlan(nextPlan);
+              setCompletionNotice({ message: "买菜清单已同步到首页", undoId: null });
+            }}
+            onClose={() => {
+              setMealPlannerMode(null);
+              setError("");
+            }}
+          />
+        )}
+
         {/* 04. Create / Import / Drafts Sheet */}
         {createSheetOpen && (
           <CreateRecipeSheet
@@ -1436,6 +2012,10 @@ export default function App() {
               setError("");
               setGenerationSelectorOpen(true);
             }}
+            onOpenManualRecipe={() => {
+              setError("");
+              setCreatingManualRecipe(true);
+            }}
             onOpenDraft={(draft) => {
               setError("");
               setDraftEditor(draft);
@@ -1455,9 +2035,11 @@ export default function App() {
             recipe={selectedRecipe}
             availableNames={availableNames}
             pantrySet={pantrySet}
+            pregnancyMode={pregnancyMode}
             busy={busy}
             deleting={pendingAction === "recipe-delete"}
             error={error}
+            onAddMissingToShopping={() => addMissingToShoppingList(selectedRecipe)}
             onEdit={() => {
               setRecipeEditor(selectedRecipe);
               setSelectedRecipe(null);
@@ -1483,7 +2065,7 @@ export default function App() {
             recipe={cookingRecipe}
             busy={pendingAction === "cooking-complete"}
             error={error}
-            onComplete={(consumptions) => completeCooking(cookingRecipe, consumptions)}
+            onComplete={(consumptions, opts) => completeCooking(cookingRecipe, consumptions, opts)}
             onClose={() => {
               setCookingRecipe(null);
               setError("");
@@ -1510,6 +2092,7 @@ export default function App() {
           <IngredientEditorSheet
             key={ingredientEditor.id ?? "new"}
             ingredient={ingredientEditor}
+            pregnancyMode={pregnancyMode}
             busy={busy}
             deleting={pendingAction === "ingredient-delete"}
             error={error}
@@ -1517,6 +2100,21 @@ export default function App() {
             onDelete={removeIngredient}
             onClose={() => {
               setIngredientEditor(null);
+              setError("");
+            }}
+          />
+        )}
+
+        {/* Manual New Recipe Sheet */}
+        {creatingManualRecipe && (
+          <RecipeEditorSheet
+            key="new-manual-recipe"
+            recipe={null}
+            busy={busy}
+            error={error}
+            onSave={(payload) => createManualRecipe(payload)}
+            onClose={() => {
+              setCreatingManualRecipe(false);
               setError("");
             }}
           />
@@ -1583,7 +2181,7 @@ function getMealQuestion() {
    SUBCOMPONENTS: TODAY LIST & RANDOM PICK
    ============================================================ */
 
-function TodayRecipeList({ recipes, urgentNameSet, onOpen, emptyMessage, onQuickAction }) {
+function TodayRecipeList({ recipes, urgentNameSet, pregnancyMode, busy, onOpen, onAddMissingToShopping, emptyMessage, onQuickAction }) {
   if (recipes.length === 0) {
     return (
       <div className="empty-card">
@@ -1592,7 +2190,7 @@ function TodayRecipeList({ recipes, urgentNameSet, onOpen, emptyMessage, onQuick
         <p>{emptyMessage}</p>
         <button className="btn-primary-sm" type="button" onClick={onQuickAction}>
           <Sparkles size={14} />
-          AI 配菜或导入菜谱
+          帮我想吃什么 / 规划买菜
         </button>
       </div>
     );
@@ -1604,6 +2202,9 @@ function TodayRecipeList({ recipes, urgentNameSet, onOpen, emptyMessage, onQuick
         const visual = getRecipeVisual(recipe);
         const isReady = recipe.missing.length === 0;
         const matchedUrgent = recipe.ingredients.find((item) => item.required && urgentNameSet.has(item.name));
+        const pregWarn = pregnancyMode && recipe.pregnancyWarning?.level && recipe.pregnancyWarning.level !== "safe"
+          ? recipe.pregnancyWarning
+          : null;
 
         return (
           <article
@@ -1641,9 +2242,28 @@ function TodayRecipeList({ recipes, urgentNameSet, onOpen, emptyMessage, onQuick
                   <span className="tag-pill tag-orange">缺：{recipe.missing.slice(0, 2).join("、")}{recipe.missing.length > 2 ? "…" : ""}</span>
                 )}
                 {recipe.preferenceWarning && <span className="tag-pill tag-red">{recipe.preferenceWarning}</span>}
+                {pregWarn && (
+                  <span className={`tag-pill ${pregWarn.level === "avoid" ? "tag-red" : "tag-amber"}`}>
+                    🤰 {pregWarn.level === "avoid" ? "孕期避免" : "孕期注意"}
+                  </span>
+                )}
               </div>
               {!isReady && recipe.substitutions.length > 0 && (
                 <p className="rc-sub">💡 {recipe.substitutions[0]}</p>
+              )}
+              {!isReady && onAddMissingToShopping && (
+                <button
+                  type="button"
+                  className="rc-add-shop-btn"
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAddMissingToShopping(recipe);
+                  }}
+                >
+                  <ShoppingCart size={12} aria-hidden="true" />
+                  <span>缺料加入买菜清单</span>
+                </button>
               )}
             </div>
             <ChevronRight size={18} className="rc-chev" aria-hidden="true" />
@@ -1751,15 +2371,17 @@ function CategoryRail({ categories, selectedCategory, onSelect, total }) {
   );
 }
 
-function IngredientTile({ ingredient, onEdit, disabled }) {
+function IngredientTile({ ingredient, pregnancyMode, onEdit, disabled }) {
   const isUrgent = ingredient.state === "expiring" || ingredient.state === "priority";
   const isFrozen = ingredient.state === "frozen";
   const label = stateShortLabels[ingredient.state] || "";
+  const pregLevel = pregnancyMode ? ingredient.pregnancyLevel : "";
+  const showPregWarn = pregLevel === "avoid" || pregLevel === "caution";
 
   return (
     <button
       type="button"
-      className={`ing-tile ${isUrgent ? "is-warn" : ""} ${isFrozen ? "is-frozen" : ""}`}
+      className={`ing-tile ${isUrgent ? "is-warn" : ""} ${isFrozen ? "is-frozen" : ""} ${pregLevel === "avoid" ? "is-preg-avoid" : ""}`}
       onClick={onEdit}
       disabled={disabled}
       aria-label={`编辑${ingredient.name}`}
@@ -1772,6 +2394,11 @@ function IngredientTile({ ingredient, onEdit, disabled }) {
       </span>
       <span className="tile-name">{ingredient.name}</span>
       {label && <span className={`tile-state state-${ingredient.state}`}>{label}</span>}
+      {showPregWarn && (
+        <span className={`tile-preg-tag preg-${pregLevel}`}>
+          {pregLevel === "avoid" ? "孕期避免" : "孕期慎吃"}
+        </span>
+      )}
     </button>
   );
 }
@@ -1784,9 +2411,11 @@ function RecipeDetailSheet({
   recipe,
   availableNames,
   pantrySet,
+  pregnancyMode,
   busy,
   deleting,
   error,
+  onAddMissingToShopping,
   onEdit,
   onDelete,
   onClose,
@@ -1870,13 +2499,42 @@ function RecipeDetailSheet({
                 </span>
               </div>
             ) : (
-              <div className="readiness-banner missing">
-                <span className="check-circle miss" aria-hidden="true">
-                  {recipe.missing.length}
-                </span>
-                <span>
-                  差 {recipe.missing.length} 样：{recipe.missing.join("、")}
-                </span>
+              <div className="readiness-banner missing with-action">
+                <div className="readiness-banner-left">
+                  <span className="check-circle miss" aria-hidden="true">
+                    {recipe.missing.length}
+                  </span>
+                  <span>
+                    差 {recipe.missing.length} 样：{recipe.missing.join("、")}
+                  </span>
+                </div>
+                {onAddMissingToShopping && (
+                  <button
+                    type="button"
+                    className="btn-soft-xs"
+                    onClick={onAddMissingToShopping}
+                    disabled={busy}
+                  >
+                    + 买菜清单
+                  </button>
+                )}
+              </div>
+            )}
+
+            {pregnancyMode && recipe.pregnancyWarning && recipe.pregnancyWarning.level !== "safe" && (
+              <div className={`detail-preg-box preg-${recipe.pregnancyWarning.level}`}>
+                <div className="detail-preg-head">
+                  <ShieldAlert size={15} aria-hidden="true" />
+                  <strong>🤰 {recipe.pregnancyWarning.summary || "孕期食用提示"}</strong>
+                </div>
+                <ul className="detail-preg-list">
+                  {(recipe.pregnancyWarning.items || []).map((item) => (
+                    <li key={item.name}>
+                      <strong>{item.name}</strong>：{item.note}
+                    </li>
+                  ))}
+                </ul>
+                <span className="preg-disclaimer">{PREGNANCY_DISCLAIMER}</span>
               </div>
             )}
 
@@ -2045,6 +2703,7 @@ function CreateRecipeSheet({
   onSelectImage,
   onAnalyze,
   onOpenAiGenerate,
+  onOpenManualRecipe,
   onOpenDraft,
   onDeleteDraft,
   onClose,
@@ -2140,6 +2799,19 @@ function CreateRecipeSheet({
                 <span>口述菜谱</span>
               </button>
             </div>
+
+            {onOpenManualRecipe && (
+              <button
+                type="button"
+                className="manual-recipe-entry-btn"
+                onClick={onOpenManualRecipe}
+                disabled={busy}
+              >
+                <Pencil size={15} aria-hidden="true" />
+                <span>手动写一道自家拿手菜</span>
+                <ChevronRight size={16} aria-hidden="true" />
+              </button>
+            )}
 
             {/* Pending Drafts */}
             <div className="section-head" style={{ marginTop: 18 }}>
@@ -2356,6 +3028,7 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
 
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [saveTempRecipe, setSaveTempRecipe] = useState(Boolean(recipe.isTemporary));
   const [consumptions, setConsumptions] = useState(() =>
     Object.fromEntries(required.map((item) => [item.name, "kept"])),
   );
@@ -2511,7 +3184,7 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
       name: item.name,
       action: forceNoChanges ? "kept" : consumptions[item.name],
     }));
-    await onComplete(values).catch(() => {});
+    await onComplete(values, { saveTempRecipe: Boolean(recipe.isTemporary && saveTempRecipe) }).catch(() => {});
   }
 
   // Screen 06: Done & Inventory Reconciliation
@@ -2586,6 +3259,17 @@ function CookingMode({ recipe, busy, error, onComplete, onClose }) {
         </div>
 
         <footer className="done-sticky-footer">
+          {recipe.isTemporary && (
+            <label className="done-save-recipe-opt">
+              <input
+                type="checkbox"
+                checked={saveTempRecipe}
+                onChange={(event) => setSaveTempRecipe(event.target.checked)}
+                disabled={busy}
+              />
+              <span>顺手把「{recipe.title}」收藏到自家菜谱库</span>
+            </label>
+          )}
           <button
             type="button"
             className="btn-primary full lg"
@@ -2934,9 +3618,22 @@ function playGentleChime() {
    FAMILY SPACE TAB
    ============================================================ */
 
-function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState, busy, onRefresh, onOpenCreate, onSignOut }) {
+function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState, busy, onRefresh, onUpdateSettings, onOpenCreate, onSignOut }) {
   const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const settings = app.settings || { pregnancyMode: true, dietaryNotes: "", defaultMealStyle: "2菜+主食" };
+  const [dietaryDraft, setDietaryDraft] = useState(settings.dietaryNotes || "");
   const preferenceTags = [...new Set(allRecipes.map((r) => r.preferenceWarning).filter(Boolean))];
+  const quickDietaryTags = ["孕早期", "孕中期", "孕晚期", "注意控糖", "少辣清淡", "不吃香菜"];
+
+  useEffect(() => {
+    setDietaryDraft(settings.dietaryNotes || "");
+  }, [settings.dietaryNotes]);
+
+  function toggleDietaryTag(tag) {
+    const parts = dietaryDraft.split(/[、，,\s]+/).map((s) => s.trim()).filter(Boolean);
+    const next = parts.includes(tag) ? parts.filter((s) => s !== tag) : [...parts, tag];
+    setDietaryDraft(next.join("、"));
+  }
 
   return (
     <div className="page-stack">
@@ -2969,6 +3666,69 @@ function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState,
             <strong>{app.drafts.length}</strong>
             <span>待确认草稿</span>
           </div>
+        </div>
+      </section>
+
+      {/* Pregnancy Dietary Protection Settings */}
+      <section className="settings-card pregnancy-settings-card" aria-labelledby="pregnancy-settings-heading">
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <strong id="pregnancy-settings-heading">🤰 孕期饮食守护</strong>
+            <span>新增食材自动提示孕期是否适合，AI 推荐与买菜自动避开高风险食材</span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={Boolean(settings.pregnancyMode)}
+            aria-label="切换孕期饮食守护"
+            className={`toggle-switch ${settings.pregnancyMode ? "on" : ""}`}
+            onClick={() => onUpdateSettings?.({ pregnancyMode: !settings.pregnancyMode })}
+            disabled={busy}
+          >
+            <span className="toggle-knob" />
+          </button>
+        </div>
+
+        <div className="dietary-notes-block">
+          <label className="field-block">
+            <span>家庭阶段与饮食备注（AI 配菜与买菜规划会自动遵循）</span>
+            <input
+              className="styled-input sm"
+              value={dietaryDraft}
+              onChange={(event) => setDietaryDraft(event.target.value)}
+              maxLength={120}
+              placeholder="例如：孕中期、注意控糖、少辣清淡"
+              disabled={busy}
+            />
+          </label>
+          <div className="dietary-quick-chips">
+            {quickDietaryTags.map((tag) => {
+              const active = dietaryDraft.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`filter-chip ${active ? "active" : ""}`}
+                  onClick={() => toggleDietaryTag(tag)}
+                  disabled={busy}
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
+          {dietaryDraft.trim() !== (settings.dietaryNotes || "").trim() && (
+            <button
+              type="button"
+              className="btn-primary-sm"
+              onClick={() => onUpdateSettings?.({ dietaryNotes: dietaryDraft.trim() })}
+              disabled={busy}
+            >
+              <Save size={14} />
+              <span>保存家庭饮食备注</span>
+            </button>
+          )}
+          <p className="preg-disclaimer">{PREGNANCY_DISCLAIMER}</p>
         </div>
       </section>
 
@@ -3183,7 +3943,7 @@ function IngredientSelectionSheet({ categories, busy, error, onGenerate, onClose
    INGREDIENT EDITOR SHEET
    ============================================================ */
 
-function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDelete, onClose }) {
+function IngredientEditorSheet({ ingredient, pregnancyMode = true, busy, deleting, error, onSave, onDelete, onClose }) {
   const editing = Boolean(ingredient.id);
   const [form, setForm] = useState({ ...ingredient });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -3238,6 +3998,13 @@ function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDe
               required
             />
           </label>
+
+          {pregnancyMode && form.name.trim() && (
+            <PregnancyInfoBox
+              name={form.name}
+              stored={editing && form.name.trim() === ingredient.name ? ingredient : null}
+            />
+          )}
 
           <fieldset className="option-fieldset">
             <legend>食材分类</legend>
@@ -3322,19 +4089,29 @@ function IngredientEditorSheet({ ingredient, busy, deleting, error, onSave, onDe
    ============================================================ */
 
 function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
-  const isDraft = recipe.status === "draft";
+  const isNew = !recipe;
+  const isDraft = !isNew && recipe.status === "draft";
   const [form, setForm] = useState({
-    id: recipe.id,
-    title: recipe.title,
-    method: recipe.method,
-    minutes: recipe.minutes,
-    preferenceWarning: recipe.preferenceWarning || "",
-    ingredients: recipe.ingredients.map((item) => ({
-      name: item.name,
-      quantityLabel: item.quantityLabel || "",
-      required: Boolean(item.required),
-    })),
-    steps: recipe.steps.map((step) => step.text),
+    id: recipe?.id ?? null,
+    title: recipe?.title || "",
+    method: recipe?.method || "炒",
+    minutes: recipe?.minutes || 15,
+    preferenceWarning: recipe?.preferenceWarning || "",
+    ingredients:
+      recipe?.ingredients?.length > 0
+        ? recipe.ingredients.map((item) => ({
+            name: item.name,
+            quantityLabel: item.quantityLabel || "",
+            required: Boolean(item.required),
+          }))
+        : [
+            { name: "", quantityLabel: "", required: true },
+            { name: "", quantityLabel: "", required: true },
+          ],
+    steps:
+      recipe?.steps?.length > 0
+        ? recipe.steps.map((step) => step.text)
+        : ["", ""],
   });
 
   useBodyLockAndEscape(busy, onClose);
@@ -3408,15 +4185,21 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
         <div className="sheet-grab" aria-hidden="true" />
         <header className="sheet-top-row padded">
           <div>
-            <h2 id="draft-editor-title">{isDraft ? "编辑菜谱草稿" : "编辑菜谱"}</h2>
-            <p className="sheet-subtitle">{isDraft ? "修改标题、食材和步骤，可保存草稿或确认入库" : "修改后会立即重新匹配菜谱"}</p>
+            <h2 id="draft-editor-title">{isNew ? "手动写菜谱" : isDraft ? "编辑菜谱草稿" : "编辑菜谱"}</h2>
+            <p className="sheet-subtitle">
+              {isNew
+                ? "记录家里拿手菜，保存后立即参与菜谱匹配"
+                : isDraft
+                  ? "修改标题、食材和步骤，可保存草稿或确认入库"
+                  : "修改后会立即重新匹配菜谱"}
+            </p>
           </div>
           <button
             className="sheet-close-btn"
             type="button"
             onClick={onClose}
             disabled={busy}
-            aria-label={isDraft ? "关闭草稿编辑" : "关闭菜谱编辑"}
+            aria-label={isNew ? "关闭新建菜谱" : isDraft ? "关闭草稿编辑" : "关闭菜谱编辑"}
           >
             <X size={18} />
           </button>
@@ -3578,7 +4361,7 @@ function RecipeEditorSheet({ recipe, busy, error, onSave, onClose }) {
             ) : (
               <button className="btn-primary full" type="submit" disabled={busy}>
                 <Save size={16} />
-                <span>{busy ? "正在保存..." : "保存修改"}</span>
+                <span>{busy ? "正在保存..." : isNew ? "保存到菜谱库" : "保存修改"}</span>
               </button>
             )}
           </div>

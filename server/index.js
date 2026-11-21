@@ -5,6 +5,21 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
+import {
+  buildMealPlanMessages,
+  buildSingleIngredientPregnancyMessages,
+  normalizeLlmPregnancyEvaluation,
+  sanitizeLlmMealPlan,
+} from "../shared/mealPlanner.js";
+import {
+  buildLocalMealSuggestions,
+  defaultFamilySettings,
+  evaluateIngredientPregnancy,
+  evaluateRecipePregnancy,
+  normalizePregnancyLevel,
+  sanitizeShoppingPlan,
+  sanitizeSuggestedMeal,
+} from "../shared/pregnancy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -81,9 +96,48 @@ db.exec(`
     undone INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS app_state_kv (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `);
 
+ensureIngredientPregnancyColumns();
 seedDatabase();
+
+function ensureIngredientPregnancyColumns() {
+  const cols = db.prepare("PRAGMA table_info(ingredients)").all().map((c) => c.name);
+  if (!cols.includes("pregnancy_level")) {
+    db.exec("ALTER TABLE ingredients ADD COLUMN pregnancy_level TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes("pregnancy_note")) {
+    db.exec("ALTER TABLE ingredients ADD COLUMN pregnancy_note TEXT NOT NULL DEFAULT ''");
+  }
+}
+
+function readKv(key, fallback = null) {
+  const row = db.prepare("SELECT value_json FROM app_state_kv WHERE key = ?").get(key);
+  if (!row) return fallback;
+  try {
+    return JSON.parse(row.value_json);
+  } catch {
+    return fallback;
+  }
+}
+
+function writeKv(key, value) {
+  if (value === null || value === undefined) {
+    db.prepare("DELETE FROM app_state_kv WHERE key = ?").run(key);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO app_state_kv (key, value_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+  `).run(key, JSON.stringify(value), new Date().toISOString());
+}
 
 const app = express();
 app.use(express.json({ limit: "14mb" }));
@@ -117,6 +171,232 @@ app.get("/api/app", (req, res) => {
   res.json(readAppState());
 });
 
+app.patch("/api/settings", (req, res) => {
+  const current = defaultFamilySettings(readKv("settings"));
+  const next = defaultFamilySettings({
+    pregnancyMode: Object.hasOwn(req.body || {}, "pregnancyMode") ? Boolean(req.body.pregnancyMode) : current.pregnancyMode,
+    dietaryNotes: Object.hasOwn(req.body || {}, "dietaryNotes") ? String(req.body.dietaryNotes || "") : current.dietaryNotes,
+    defaultMealStyle: Object.hasOwn(req.body || {}, "defaultMealStyle")
+      ? String(req.body.defaultMealStyle || "")
+      : current.defaultMealStyle,
+  });
+  writeKv("settings", next);
+  res.json(readAppState());
+});
+
+app.post("/api/recipes", (req, res) => {
+  const title = String(req.body?.title || "").trim().slice(0, 40);
+  const rawIngredients = Array.isArray(req.body?.ingredients) ? req.body.ingredients : [];
+  const ingredients = rawIngredients
+    .map((item) => {
+      const sanitized = sanitizeIngredientItems([item], { includeQuantity: true })[0];
+      return sanitized ? { ...sanitized, required: Boolean(item.required) } : null;
+    })
+    .filter(Boolean);
+  const rawSteps = Array.isArray(req.body?.steps) ? req.body.steps.slice(0, 12) : [];
+  const steps = rawSteps.map((step) => (typeof step === "string" ? step : String(step?.text || "")).trim()).filter(Boolean);
+
+  if (
+    !title
+    || ingredients.length === 0
+    || ingredients.length !== rawIngredients.length
+    || steps.length === 0
+    || steps.length !== rawSteps.length
+  ) {
+    return res.status(422).json({ error: "请填写标题、食材和烹饪步骤" });
+  }
+
+  const status = req.body?.status === "draft" ? "draft" : "formal";
+  const sourceType = ["manual", "planned", "generated", "text", "web", "image"].includes(req.body?.sourceType)
+    ? req.body.sourceType
+    : "manual";
+  let recipeId;
+  runInTransaction(() => {
+    recipeId = db.prepare(`
+      INSERT INTO recipes (title, method, minutes, preference_warning, status, source_type, source_text)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      title,
+      normalizeMethod(req.body?.method),
+      clampMinutes(req.body?.minutes),
+      String(req.body?.preferenceWarning || "").trim().slice(0, 30),
+      status,
+      sourceType,
+      String(req.body?.sourceText || "").slice(0, 1000),
+    ).lastInsertRowid;
+    const insertIngredient = db.prepare("INSERT INTO recipe_ingredients (recipe_id, name, quantity_label, required) VALUES (?, ?, ?, ?)");
+    const insertStep = db.prepare("INSERT INTO recipe_steps (recipe_id, position, text) VALUES (?, ?, ?)");
+    ingredients.forEach((item) => insertIngredient.run(recipeId, item.name, item.quantityLabel, item.required ? 1 : 0));
+    steps.forEach((step, index) => insertStep.run(recipeId, index + 1, step));
+  });
+
+  const appState = readAppState();
+  const saved = status === "draft"
+    ? appState.drafts.find((item) => item.id === Number(recipeId))
+    : [...appState.matches.ready, ...appState.matches.missing].find((item) => item.id === Number(recipeId));
+  res.json({ recipe: saved, app: appState });
+});
+
+app.post("/api/meal-plan/suggest", async (req, res) => {
+  const mode = req.body?.mode === "shopping_plan" ? "shopping_plan" : "use_existing";
+  const dishCount = Math.max(1, Math.min(4, Number(req.body?.dishCount) || 2));
+  const includeStaple = req.body?.includeStaple === undefined ? true : Boolean(req.body.includeStaple);
+  const mealsCount = Math.max(1, Math.min(3, Number(req.body?.mealsCount) || 1));
+  const style = String(req.body?.style || "").trim().slice(0, 40);
+  const maxMinutes = Math.max(0, Math.min(180, Number(req.body?.maxMinutes) || 0));
+  const excludeTitles = Array.isArray(req.body?.excludeTitles)
+    ? req.body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 15)
+    : [];
+  const shoppingMode = req.body?.shoppingMode === "fresh" ? "fresh" : "top_up";
+
+  const appState = readAppState();
+  const formalRecipes = [...appState.matches.ready, ...appState.matches.missing];
+  const params = {
+    mode,
+    ingredients: appState.ingredients,
+    formalRecipes,
+    settings: appState.settings,
+    dishCount,
+    includeStaple,
+    mealsCount,
+    style,
+    maxMinutes,
+    excludeTitles,
+    shoppingMode,
+  };
+
+  if (!llmConfigured || (mode === "use_existing" && appState.ingredients.length === 0)) {
+    return res.json({ plan: buildLocalMealSuggestions(params) });
+  }
+
+  const raw = await callDashScopeJson({
+    model: dashScopeTextModel,
+    messages: buildMealPlanMessages(params),
+  });
+  res.json({ plan: sanitizeLlmMealPlan(raw, params) });
+});
+
+app.put("/api/shopping-plan", (req, res) => {
+  if (req.body?.clear) {
+    writeKv("shoppingPlan", null);
+    return res.json(readAppState());
+  }
+  const appState = readAppState();
+  const ingMap = new Map(appState.ingredients.map((item) => [item.name, item]));
+  const sanitized = sanitizeShoppingPlan(req.body, ingMap);
+  writeKv("shoppingPlan", sanitized);
+  res.json(readAppState());
+});
+
+app.post("/api/shopping-plan/commit", async (req, res) => {
+  const currentPlan = readKv("shoppingPlan");
+  if (!currentPlan || !Array.isArray(currentPlan.items)) {
+    return res.json({ ...readAppState(), addedIngredients: [], savedRecipeIds: [] });
+  }
+
+  const requestedIds = Array.isArray(req.body?.itemIds) ? new Set(req.body.itemIds.map(String)) : null;
+  const saveMeals = Boolean(req.body?.saveMeals);
+  const toCommit = currentPlan.items.filter((item) =>
+    requestedIds ? requestedIds.has(String(item.id)) : Boolean(item.checked),
+  );
+  if (toCommit.length === 0 && !saveMeals) {
+    return res.status(422).json({ error: "请先勾选已买到的食材" });
+  }
+
+  const evaluatedItems = [];
+  for (const item of toCommit) {
+    const name = normalizeIngredientName(item.name);
+    if (!name) continue;
+    let preg = evaluateIngredientPregnancy(name, {
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    });
+    if (preg.level === "unknown") {
+      preg = await assessSingleIngredientPregnancy(name);
+    }
+    evaluatedItems.push({
+      id: item.id,
+      name,
+      category: normalizeCategory(item.category || classifyIngredient(name)),
+      state: "none",
+      pregnancyLevel: preg.level,
+      pregnancyNote: preg.note,
+    });
+  }
+
+  const committedIdSet = new Set(toCommit.map((item) => String(item.id)));
+  const savedRecipeIds = [];
+
+  runInTransaction(() => {
+    const upsert = db.prepare(`
+      INSERT INTO ingredients (name, category, state, pregnancy_level, pregnancy_note)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET
+        category = excluded.category,
+        pregnancy_level = CASE WHEN excluded.pregnancy_level != '' AND excluded.pregnancy_level != 'unknown' THEN excluded.pregnancy_level ELSE ingredients.pregnancy_level END,
+        pregnancy_note = CASE WHEN excluded.pregnancy_note != '' THEN excluded.pregnancy_note ELSE ingredients.pregnancy_note END
+    `);
+    for (const item of evaluatedItems) {
+      upsert.run(item.name, item.category, item.state, item.pregnancyLevel, item.pregnancyNote);
+    }
+
+    if (saveMeals && Array.isArray(currentPlan.meals)) {
+      const existingTitles = new Set(
+        db.prepare("SELECT title FROM recipes WHERE status = 'formal'").all().map((r) => r.title),
+      );
+      const insertRecipe = db.prepare(`
+        INSERT INTO recipes (title, method, minutes, preference_warning, status, source_type, source_text)
+        VALUES (?, ?, ?, ?, 'formal', 'planned', ?)
+      `);
+      const insertIngredient = db.prepare("INSERT INTO recipe_ingredients (recipe_id, name, quantity_label, required) VALUES (?, ?, ?, ?)");
+      const insertStep = db.prepare("INSERT INTO recipe_steps (recipe_id, position, text) VALUES (?, ?, ?)");
+
+      for (const rawMeal of currentPlan.meals) {
+        const meal = sanitizeSuggestedMeal(rawMeal);
+        if (!meal || existingTitles.has(meal.title)) continue;
+        existingTitles.add(meal.title);
+        const id = insertRecipe.run(meal.title, normalizeMethod(meal.method), clampMinutes(meal.minutes), meal.preferenceWarning || "", meal.reason || "").lastInsertRowid;
+        meal.ingredients.forEach((ing) => insertIngredient.run(id, ing.name, ing.quantityLabel || "", ing.required ? 1 : 0));
+        meal.steps.forEach((step, idx) => insertStep.run(id, idx + 1, step.text));
+        savedRecipeIds.push(Number(id));
+      }
+    }
+
+    const remainingItems = (currentPlan.items || []).filter((item) => !committedIdSet.has(String(item.id)));
+    if (remainingItems.length === 0) {
+      writeKv("shoppingPlan", null);
+    } else {
+      writeKv("shoppingPlan", { ...currentPlan, items: remainingItems, updatedAt: new Date().toISOString() });
+    }
+  });
+
+  res.json({
+    ...readAppState(),
+    addedIngredients: evaluatedItems.map((item) => ({
+      name: item.name,
+      category: item.category,
+      state: item.state,
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    })),
+    savedRecipeIds,
+  });
+});
+
+async function assessSingleIngredientPregnancy(name) {
+  const local = evaluateIngredientPregnancy(name);
+  if (local.level !== "unknown" || !llmConfigured) return local;
+  try {
+    const result = await callDashScopeJson({
+      model: dashScopeTextModel,
+      messages: buildSingleIngredientPregnancyMessages(name),
+    });
+    return normalizeLlmPregnancyEvaluation(result, name);
+  } catch {
+    return local;
+  }
+}
+
 app.post("/api/audio/transcriptions", async (req, res) => {
   if (!dashScopeApiKey) return res.status(503).json({ error: "语音识别尚未配置" });
   const audioDataUrl = String(req.body?.audioDataUrl || "");
@@ -131,7 +411,7 @@ app.post("/api/audio/transcriptions", async (req, res) => {
   res.json({ text: await transcribeAudio(audioDataUrl) });
 });
 
-app.post("/api/ingredients", (req, res) => {
+app.post("/api/ingredients", async (req, res) => {
   const name = normalizeIngredientName(String(req.body?.name || ""));
 
   if (!name) {
@@ -145,34 +425,78 @@ app.post("/api/ingredients", (req, res) => {
   const categoryInput = String(req.body?.category || "").trim();
   const category = categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name);
   const state = normalizeState(req.body?.state);
+  const pregnancy = await assessSingleIngredientPregnancy(name);
 
   db.prepare(`
-    INSERT INTO ingredients (name, category, state)
-    VALUES (?, ?, ?)
-  `).run(name, category, state);
+    INSERT INTO ingredients (name, category, state, pregnancy_level, pregnancy_note)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(name, category, state, pregnancy.level, pregnancy.note);
 
-  res.json(readAppState());
+  res.json({
+    ...readAppState(),
+    addedIngredients: [
+      {
+        name,
+        category,
+        state,
+        pregnancyLevel: pregnancy.level,
+        pregnancyNote: pregnancy.note,
+      },
+    ],
+  });
 });
 
 app.post("/api/ingredients/batch", async (req, res) => {
   const parsed = await parseIngredientInput(req.body?.text || "");
+  const enriched = [];
+  for (const item of parsed) {
+    let preg = evaluateIngredientPregnancy(item.name, {
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    });
+    if (preg.level === "unknown") {
+      preg = await assessSingleIngredientPregnancy(item.name);
+    }
+    enriched.push({
+      ...item,
+      pregnancyLevel: preg.level,
+      pregnancyNote: preg.note,
+    });
+  }
   const insert = db.prepare(`
-    INSERT INTO ingredients (name, category, state)
-    VALUES (?, ?, ?)
+    INSERT INTO ingredients (name, category, state, pregnancy_level, pregnancy_note)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(name) DO UPDATE SET
       category = excluded.category,
       state = CASE
         WHEN excluded.state = 'none' THEN ingredients.state
         ELSE excluded.state
+      END,
+      pregnancy_level = CASE
+        WHEN excluded.pregnancy_level != '' AND excluded.pregnancy_level != 'unknown' THEN excluded.pregnancy_level
+        ELSE ingredients.pregnancy_level
+      END,
+      pregnancy_note = CASE
+        WHEN excluded.pregnancy_note != '' THEN excluded.pregnancy_note
+        ELSE ingredients.pregnancy_note
       END
   `);
 
   runInTransaction(() => {
-    for (const item of parsed) {
-      insert.run(item.name, item.category, item.state);
+    for (const item of enriched) {
+      insert.run(item.name, item.category, item.state, item.pregnancyLevel, item.pregnancyNote);
     }
   });
-  res.json(readAppState());
+  res.json({
+    ...readAppState(),
+    addedIngredients: enriched.map((item) => ({
+      name: item.name,
+      category: item.category,
+      state: item.state,
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    })),
+  });
 });
 
 app.patch("/api/ingredients/:id", (req, res) => {
@@ -195,12 +519,21 @@ app.patch("/api/ingredients/:id", (req, res) => {
   const categoryInput = String(req.body?.category ?? ingredient.category).trim();
   const category = categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name);
   const state = normalizeState(req.body?.state ?? ingredient.state);
+  const renamed = name !== ingredient.name;
+  const preg = renamed ? evaluateIngredientPregnancy(name) : null;
 
   db.prepare(`
     UPDATE ingredients
-    SET name = ?, category = ?, state = ?
+    SET name = ?, category = ?, state = ?, pregnancy_level = ?, pregnancy_note = ?
     WHERE id = ?
-  `).run(name, category, state, req.params.id);
+  `).run(
+    name,
+    category,
+    state,
+    renamed ? preg.level : ingredient.pregnancy_level || "",
+    renamed ? preg.note : ingredient.pregnancy_note || "",
+    req.params.id,
+  );
 
   res.json(readAppState());
 });
@@ -461,7 +794,22 @@ app.listen(port, host, () => {
 });
 
 function readAppState() {
-  const ingredients = db.prepare("SELECT id, name, category, state FROM ingredients ORDER BY category, name").all();
+  const settings = defaultFamilySettings(readKv("settings"));
+  const ingredients = db
+    .prepare("SELECT id, name, category, state, pregnancy_level, pregnancy_note FROM ingredients ORDER BY category, name")
+    .all()
+    .map((row) => {
+      const preg = evaluateIngredientPregnancy(row.name, row);
+      return {
+        id: row.id,
+        name: row.name,
+        category: row.category,
+        state: row.state,
+        pregnancyLevel: preg.level,
+        pregnancyNote: preg.note,
+      };
+    });
+  const ingredientsByName = new Map(ingredients.map((item) => [item.name, item]));
   const recipes = db.prepare("SELECT * FROM recipes ORDER BY id DESC").all();
   const recipeIds = recipes.map((recipe) => recipe.id);
   const ingredientsByRecipe = new Map();
@@ -494,13 +842,20 @@ function readAppState() {
   }
 
   const formalRecipes = recipes.filter((recipe) => recipe.status === "formal").map((recipe) => toRecipe(recipe, ingredientsByRecipe, stepsByRecipe));
-  const drafts = recipes.filter((recipe) => recipe.status === "draft").map((recipe) => toRecipe(recipe, ingredientsByRecipe, stepsByRecipe));
+  const drafts = recipes
+    .filter((recipe) => recipe.status === "draft")
+    .map((recipe) => {
+      const r = toRecipe(recipe, ingredientsByRecipe, stepsByRecipe);
+      return { ...r, pregnancyWarning: evaluateRecipePregnancy(r, ingredientsByName) };
+    });
 
   return {
     family: {
       name: "张家",
       accessMode: "家庭访问码",
     },
+    settings,
+    shoppingPlan: sanitizeShoppingPlan(readKv("shoppingPlan"), ingredientsByName),
     ai: {
       configured: llmConfigured,
       textModel: dashScopeTextModel,
@@ -509,7 +864,7 @@ function readAppState() {
     pantry: ["盐", "白糖", "生抽", "老抽", "食用油", "香醋", "料酒"],
     categories: groupIngredients(ingredients),
     ingredients,
-    matches: buildMatches(ingredients, formalRecipes),
+    matches: buildMatches(ingredients, formalRecipes, settings, ingredientsByName),
     drafts,
   };
 }
@@ -529,7 +884,7 @@ function toRecipe(recipe, ingredientsByRecipe, stepsByRecipe) {
   };
 }
 
-function buildMatches(ingredients, recipes) {
+function buildMatches(ingredients, recipes, settings = defaultFamilySettings(), ingredientsByName = new Map(ingredients.map((item) => [item.name, item]))) {
   const available = new Set(ingredients.map((item) => item.name));
   const pantry = new Set(["盐", "白糖", "生抽", "老抽", "食用油", "香醋", "料酒"]);
   const priority = new Set(ingredients.filter((item) => item.state === "priority" || item.state === "expiring").map((item) => item.name));
@@ -544,9 +899,15 @@ function buildMatches(ingredients, recipes) {
       missing,
       usesPriority,
       substitutions: missing.flatMap((name) => substituteFor(name)),
+      pregnancyWarning: evaluateRecipePregnancy(recipe, ingredientsByName),
     };
   }).sort((a, b) => {
     if (a.missing.length !== b.missing.length) return a.missing.length - b.missing.length;
+    if (settings.pregnancyMode) {
+      const aAvoid = a.pregnancyWarning?.level === "avoid" ? 1 : 0;
+      const bAvoid = b.pregnancyWarning?.level === "avoid" ? 1 : 0;
+      if (aAvoid !== bAvoid) return aAvoid - bAvoid;
+    }
     if (Boolean(a.preferenceWarning) !== Boolean(b.preferenceWarning)) return a.preferenceWarning ? 1 : -1;
     return a.minutes - b.minutes;
   });
@@ -860,6 +1221,11 @@ function sanitizeIngredientItems(items, { includeQuantity = false } = {}) {
         category: normalizeCategory(item?.category || classifyIngredient(name)),
         state: normalizeState(item?.state),
       };
+      const pregLevel = normalizePregnancyLevel(item?.pregnancyLevel);
+      if (pregLevel) {
+        ingredient.pregnancyLevel = pregLevel;
+        ingredient.pregnancyNote = String(item?.pregnancyNote || "").trim().slice(0, 80);
+      }
 
       if (includeQuantity) {
         ingredient.quantityLabel = String(item?.quantityLabel || item?.quantity || "").trim().slice(0, 20);

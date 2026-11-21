@@ -1,3 +1,19 @@
+import {
+  buildMealPlanMessages,
+  buildSingleIngredientPregnancyMessages,
+  normalizeLlmPregnancyEvaluation,
+  sanitizeLlmMealPlan,
+} from "../shared/mealPlanner.js";
+import {
+  buildLocalMealSuggestions,
+  defaultFamilySettings,
+  evaluateIngredientPregnancy,
+  evaluateRecipePregnancy,
+  normalizePregnancyLevel,
+  sanitizeShoppingPlan,
+  sanitizeSuggestedMeal,
+} from "../shared/pregnancy.js";
+
 const DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const DEFAULT_TEXT_MODEL = "qwen-plus";
 const DEFAULT_VISION_MODEL = "qwen3-vl-plus";
@@ -40,6 +56,26 @@ export default {
 
       if (request.method === "GET" && pathname === "/api/app") {
         return json(await readAppState(env));
+      }
+
+      if (request.method === "PATCH" && pathname === "/api/settings") {
+        return await updateSettings(request, env);
+      }
+
+      if (request.method === "POST" && pathname === "/api/recipes") {
+        return await createRecipeFormal(request, env);
+      }
+
+      if (request.method === "POST" && pathname === "/api/meal-plan/suggest") {
+        return await suggestMealPlan(request, env);
+      }
+
+      if (request.method === "PUT" && pathname === "/api/shopping-plan") {
+        return await updateShoppingPlan(request, env);
+      }
+
+      if (request.method === "POST" && pathname === "/api/shopping-plan/commit") {
+        return await commitShoppingPlan(request, env);
       }
 
       if (request.method === "POST" && pathname === "/api/ingredients") {
@@ -153,6 +189,265 @@ async function readJson(request) {
   }
 }
 
+async function readKv(env, key, fallback = null) {
+  try {
+    const row = await env.DB.prepare("SELECT value_json FROM app_state_kv WHERE key = ?").bind(key).first();
+    if (!row) return fallback;
+    return JSON.parse(row.value_json);
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeKv(env, key, value) {
+  if (value === null || value === undefined) {
+    await env.DB.prepare("DELETE FROM app_state_kv WHERE key = ?").bind(key).run();
+    return;
+  }
+  await env.DB.prepare(`
+    INSERT INTO app_state_kv (key, value_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+  `).bind(key, JSON.stringify(value), new Date().toISOString()).run();
+}
+
+async function assessSingleIngredientPregnancy(name, env) {
+  const local = evaluateIngredientPregnancy(name);
+  if (local.level !== "unknown" || !env.DASHSCOPE_API_KEY) return local;
+  try {
+    const result = await callDashScopeJson({
+      model: env.DASHSCOPE_TEXT_MODEL || DEFAULT_TEXT_MODEL,
+      messages: buildSingleIngredientPregnancyMessages(name),
+    }, env);
+    return normalizeLlmPregnancyEvaluation(result, name);
+  } catch {
+    return local;
+  }
+}
+
+async function updateSettings(request, env) {
+  const body = await readJson(request);
+  const current = defaultFamilySettings(await readKv(env, "settings"));
+  const next = defaultFamilySettings({
+    pregnancyMode: Object.hasOwn(body || {}, "pregnancyMode") ? Boolean(body.pregnancyMode) : current.pregnancyMode,
+    dietaryNotes: Object.hasOwn(body || {}, "dietaryNotes") ? String(body.dietaryNotes || "") : current.dietaryNotes,
+    defaultMealStyle: Object.hasOwn(body || {}, "defaultMealStyle")
+      ? String(body.defaultMealStyle || "")
+      : current.defaultMealStyle,
+  });
+  await writeKv(env, "settings", next);
+  return json(await readAppState(env));
+}
+
+async function createRecipeFormal(request, env) {
+  const body = await readJson(request);
+  const title = String(body?.title || "").trim().slice(0, 40);
+  const rawIngredients = Array.isArray(body?.ingredients) ? body.ingredients : [];
+  const ingredients = rawIngredients.map((item) => {
+    const sanitized = sanitizeIngredientItems([item], { includeQuantity: true })[0];
+    return sanitized ? { ...sanitized, required: Boolean(item.required) } : null;
+  }).filter(Boolean);
+  const rawSteps = Array.isArray(body?.steps) ? body.steps.slice(0, 12) : [];
+  const steps = rawSteps.map((step) => (typeof step === "string" ? step : String(step?.text || "")).trim()).filter(Boolean);
+
+  if (!title || ingredients.length === 0 || ingredients.length !== rawIngredients.length
+    || steps.length === 0 || steps.length !== rawSteps.length) {
+    return json({ error: "请填写标题、食材和烹饪步骤" }, 422);
+  }
+
+  const status = body?.status === "draft" ? "draft" : "formal";
+  const sourceType = ["manual", "planned", "generated", "text", "web", "image"].includes(body?.sourceType)
+    ? body.sourceType
+    : "manual";
+  const recipe = await env.DB.prepare(`
+    INSERT INTO recipes (title, method, minutes, preference_warning, status, source_type, source_text)
+    VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+  `).bind(
+    title,
+    normalizeMethod(body?.method),
+    clampMinutes(body?.minutes),
+    String(body?.preferenceWarning || "").trim().slice(0, 30),
+    status,
+    sourceType,
+    String(body?.sourceText || "").slice(0, 1000),
+  ).first();
+
+  await env.DB.batch([
+    env.DB.prepare(`
+      INSERT INTO recipe_ingredients (recipe_id, name, quantity_label, required)
+      SELECT ?, item.value ->> '$.name', item.value ->> '$.quantityLabel', item.value ->> '$.required'
+      FROM json_each(?) AS item
+    `).bind(recipe.id, JSON.stringify(ingredients.map((item) => ({
+      name: item.name,
+      quantityLabel: item.quantityLabel,
+      required: item.required ? 1 : 0,
+    })))),
+    env.DB.prepare(`
+      INSERT INTO recipe_steps (recipe_id, position, text)
+      SELECT ?, CAST(step.key AS INTEGER) + 1, step.value FROM json_each(?) AS step
+    `).bind(recipe.id, JSON.stringify(steps)),
+  ]);
+
+  const app = await readAppState(env);
+  const saved = status === "draft"
+    ? app.drafts.find((item) => item.id === recipe.id)
+    : [...app.matches.ready, ...app.matches.missing].find((item) => item.id === recipe.id);
+  return json({ recipe: saved, app });
+}
+
+async function suggestMealPlan(request, env) {
+  const body = request.body ? await readJson(request) : {};
+  const mode = body?.mode === "shopping_plan" ? "shopping_plan" : "use_existing";
+  const dishCount = Math.max(1, Math.min(4, Number(body?.dishCount) || 2));
+  const includeStaple = body?.includeStaple === undefined ? true : Boolean(body.includeStaple);
+  const mealsCount = Math.max(1, Math.min(3, Number(body?.mealsCount) || 1));
+  const style = String(body?.style || "").trim().slice(0, 40);
+  const maxMinutes = Math.max(0, Math.min(180, Number(body?.maxMinutes) || 0));
+  const excludeTitles = Array.isArray(body?.excludeTitles)
+    ? body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 15)
+    : [];
+  const shoppingMode = body?.shoppingMode === "fresh" ? "fresh" : "top_up";
+
+  const app = await readAppState(env);
+  const formalRecipes = [...app.matches.ready, ...app.matches.missing];
+  const params = {
+    mode,
+    ingredients: app.ingredients,
+    formalRecipes,
+    settings: app.settings,
+    dishCount,
+    includeStaple,
+    mealsCount,
+    style,
+    maxMinutes,
+    excludeTitles,
+    shoppingMode,
+  };
+
+  if (!env.DASHSCOPE_API_KEY || (mode === "use_existing" && app.ingredients.length === 0)) {
+    return json({ plan: buildLocalMealSuggestions(params) });
+  }
+  const raw = await callDashScopeJson({
+    model: env.DASHSCOPE_TEXT_MODEL || DEFAULT_TEXT_MODEL,
+    messages: buildMealPlanMessages(params),
+  }, env);
+  return json({ plan: sanitizeLlmMealPlan(raw, params) });
+}
+
+async function updateShoppingPlan(request, env) {
+  const body = request.body ? await readJson(request) : {};
+  if (body?.clear) {
+    await writeKv(env, "shoppingPlan", null);
+    return json(await readAppState(env));
+  }
+  const app = await readAppState(env);
+  const ingMap = new Map(app.ingredients.map((item) => [item.name, item]));
+  await writeKv(env, "shoppingPlan", sanitizeShoppingPlan(body, ingMap));
+  return json(await readAppState(env));
+}
+
+async function commitShoppingPlan(request, env) {
+  const currentPlan = await readKv(env, "shoppingPlan");
+  if (!currentPlan || !Array.isArray(currentPlan.items)) {
+    return json({ ...(await readAppState(env)), addedIngredients: [], savedRecipeIds: [] });
+  }
+  const body = request.body ? await readJson(request) : {};
+  const requestedIds = Array.isArray(body?.itemIds) ? new Set(body.itemIds.map(String)) : null;
+  const saveMeals = Boolean(body?.saveMeals);
+  const toCommit = currentPlan.items.filter((item) =>
+    requestedIds ? requestedIds.has(String(item.id)) : Boolean(item.checked),
+  );
+  if (toCommit.length === 0 && !saveMeals) {
+    return json({ error: "请先勾选已买到的食材" }, 422);
+  }
+
+  const evaluatedItems = [];
+  for (const item of toCommit) {
+    const name = normalizeIngredientName(item.name);
+    if (!name) continue;
+    let preg = evaluateIngredientPregnancy(name, {
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    });
+    if (preg.level === "unknown") preg = await assessSingleIngredientPregnancy(name, env);
+    evaluatedItems.push({
+      id: item.id,
+      name,
+      category: normalizeCategory(item.category || classifyIngredient(name)),
+      state: "none",
+      pregnancyLevel: preg.level,
+      pregnancyNote: preg.note,
+    });
+  }
+
+  if (evaluatedItems.length > 0) {
+    const sql = `
+      INSERT INTO ingredients (name, category, state, pregnancy_level, pregnancy_note)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET
+        category = excluded.category,
+        pregnancy_level = CASE WHEN excluded.pregnancy_level != '' AND excluded.pregnancy_level != 'unknown' THEN excluded.pregnancy_level ELSE ingredients.pregnancy_level END,
+        pregnancy_note = CASE WHEN excluded.pregnancy_note != '' THEN excluded.pregnancy_note ELSE ingredients.pregnancy_note END
+    `;
+    await env.DB.batch(
+      evaluatedItems.map((item) =>
+        env.DB.prepare(sql).bind(item.name, item.category, item.state, item.pregnancyLevel, item.pregnancyNote),
+      ),
+    );
+  }
+
+  const savedRecipeIds = [];
+  if (saveMeals && Array.isArray(currentPlan.meals)) {
+    const [existingResult] = await env.DB.batch([env.DB.prepare("SELECT title FROM recipes WHERE status = 'formal'")]);
+    const existingTitles = new Set(existingResult.results.map((r) => r.title));
+    for (const rawMeal of currentPlan.meals) {
+      const meal = sanitizeSuggestedMeal(rawMeal);
+      if (!meal || existingTitles.has(meal.title)) continue;
+      existingTitles.add(meal.title);
+      const inserted = await env.DB.prepare(`
+        INSERT INTO recipes (title, method, minutes, preference_warning, status, source_type, source_text)
+        VALUES (?, ?, ?, ?, 'formal', 'planned', ?) RETURNING id
+      `).bind(meal.title, normalizeMethod(meal.method), clampMinutes(meal.minutes), meal.preferenceWarning || "", meal.reason || "").first();
+      await env.DB.batch([
+        env.DB.prepare(`
+          INSERT INTO recipe_ingredients (recipe_id, name, quantity_label, required)
+          SELECT ?, item.value ->> '$.name', item.value ->> '$.quantityLabel', item.value ->> '$.required'
+          FROM json_each(?) AS item
+        `).bind(inserted.id, JSON.stringify(meal.ingredients.map((i) => ({
+          name: i.name,
+          quantityLabel: i.quantityLabel || "",
+          required: i.required ? 1 : 0,
+        })))),
+        env.DB.prepare(`
+          INSERT INTO recipe_steps (recipe_id, position, text)
+          SELECT ?, CAST(step.key AS INTEGER) + 1, step.value FROM json_each(?) AS step
+        `).bind(inserted.id, JSON.stringify(meal.steps.map((s) => s.text))),
+      ]);
+      savedRecipeIds.push(Number(inserted.id));
+    }
+  }
+
+  const committedIdSet = new Set(toCommit.map((item) => String(item.id)));
+  const remainingItems = (currentPlan.items || []).filter((item) => !committedIdSet.has(String(item.id)));
+  await writeKv(
+    env,
+    "shoppingPlan",
+    remainingItems.length === 0 ? null : { ...currentPlan, items: remainingItems, updatedAt: new Date().toISOString() },
+  );
+
+  return json({
+    ...(await readAppState(env)),
+    addedIngredients: evaluatedItems.map((item) => ({
+      name: item.name,
+      category: item.category,
+      state: item.state,
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    })),
+    savedRecipeIds,
+  });
+}
+
 async function createIngredient(request, env) {
   const body = await readJson(request);
   const name = normalizeIngredientName(String(body?.name || ""));
@@ -161,29 +456,59 @@ async function createIngredient(request, env) {
   const categoryInput = String(body?.category || "").trim();
   const category = categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name);
   const state = normalizeState(body?.state);
+  const pregnancy = await assessSingleIngredientPregnancy(name, env);
   const result = await env.DB.prepare(`
-    INSERT INTO ingredients (name, category, state) VALUES (?, ?, ?)
+    INSERT INTO ingredients (name, category, state, pregnancy_level, pregnancy_note) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(name) DO NOTHING
   `)
-    .bind(name, category, state).run();
+    .bind(name, category, state, pregnancy.level, pregnancy.note).run();
   if (result.meta.changes === 0) return json({ error: "这个食材已经在清单里" }, 409);
-  return json(await readAppState(env));
+  return json({
+    ...(await readAppState(env)),
+    addedIngredients: [
+      { name, category, state, pregnancyLevel: pregnancy.level, pregnancyNote: pregnancy.note },
+    ],
+  });
 }
 
 async function createIngredientsBatch(request, env) {
   const body = await readJson(request);
   const parsed = await parseIngredientInput(body?.text || "", env);
-  if (parsed.length > 0) {
+  const enriched = [];
+  for (const item of parsed) {
+    let preg = evaluateIngredientPregnancy(item.name, {
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    });
+    if (preg.level === "unknown") preg = await assessSingleIngredientPregnancy(item.name, env);
+    enriched.push({ ...item, pregnancyLevel: preg.level, pregnancyNote: preg.note });
+  }
+  if (enriched.length > 0) {
     const sql = `
-      INSERT INTO ingredients (name, category, state)
-      VALUES (?, ?, ?)
+      INSERT INTO ingredients (name, category, state, pregnancy_level, pregnancy_note)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(name) DO UPDATE SET
         category = excluded.category,
-        state = CASE WHEN excluded.state = 'none' THEN ingredients.state ELSE excluded.state END
+        state = CASE WHEN excluded.state = 'none' THEN ingredients.state ELSE excluded.state END,
+        pregnancy_level = CASE WHEN excluded.pregnancy_level != '' AND excluded.pregnancy_level != 'unknown' THEN excluded.pregnancy_level ELSE ingredients.pregnancy_level END,
+        pregnancy_note = CASE WHEN excluded.pregnancy_note != '' THEN excluded.pregnancy_note ELSE ingredients.pregnancy_note END
     `;
-    await env.DB.batch(parsed.map((item) => env.DB.prepare(sql).bind(item.name, item.category, item.state)));
+    await env.DB.batch(
+      enriched.map((item) =>
+        env.DB.prepare(sql).bind(item.name, item.category, item.state, item.pregnancyLevel, item.pregnancyNote),
+      ),
+    );
   }
-  return json(await readAppState(env));
+  return json({
+    ...(await readAppState(env)),
+    addedIngredients: enriched.map((item) => ({
+      name: item.name,
+      category: item.category,
+      state: item.state,
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    })),
+  });
 }
 
 async function updateIngredient(request, env, id) {
@@ -400,7 +725,7 @@ async function confirmDraft(env, id) {
 
 async function readAppState(env) {
   const [ingredientResult, recipeResult, recipeIngredientResult, stepResult] = await env.DB.batch([
-    env.DB.prepare("SELECT id, name, category, state FROM ingredients ORDER BY category, name"),
+    env.DB.prepare("SELECT id, name, category, state, pregnancy_level, pregnancy_note FROM ingredients ORDER BY category, name"),
     env.DB.prepare("SELECT * FROM recipes ORDER BY id DESC"),
     env.DB.prepare(`
       SELECT recipe_id AS recipeId, name, quantity_label AS quantityLabel, required
@@ -410,7 +735,19 @@ async function readAppState(env) {
       SELECT recipe_id AS recipeId, position, text FROM recipe_steps ORDER BY recipe_id, position
     `),
   ]);
-  const ingredients = ingredientResult.results;
+  const settings = defaultFamilySettings(await readKv(env, "settings"));
+  const ingredients = ingredientResult.results.map((row) => {
+    const preg = evaluateIngredientPregnancy(row.name, row);
+    return {
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      state: row.state,
+      pregnancyLevel: preg.level,
+      pregnancyNote: preg.note,
+    };
+  });
+  const ingredientsByName = new Map(ingredients.map((item) => [item.name, item]));
   const recipes = recipeResult.results;
   const ingredientsByRecipe = new Map();
   const stepsByRecipe = new Map();
@@ -429,9 +766,14 @@ async function readAppState(env) {
   const formalRecipes = recipes.filter((recipe) => recipe.status === "formal")
     .map((recipe) => toRecipe(recipe, ingredientsByRecipe, stepsByRecipe));
   const drafts = recipes.filter((recipe) => recipe.status === "draft")
-    .map((recipe) => toRecipe(recipe, ingredientsByRecipe, stepsByRecipe));
+    .map((recipe) => {
+      const r = toRecipe(recipe, ingredientsByRecipe, stepsByRecipe);
+      return { ...r, pregnancyWarning: evaluateRecipePregnancy(r, ingredientsByName) };
+    });
   return {
     family: { name: "张家", accessMode: "家庭访问码" },
+    settings,
+    shoppingPlan: sanitizeShoppingPlan(await readKv(env, "shoppingPlan"), ingredientsByName),
     ai: {
       configured: Boolean(env.DASHSCOPE_API_KEY),
       textModel: env.DASHSCOPE_TEXT_MODEL || DEFAULT_TEXT_MODEL,
@@ -440,7 +782,7 @@ async function readAppState(env) {
     pantry: PANTRY,
     categories: groupIngredients(ingredients),
     ingredients,
-    matches: buildMatches(ingredients, formalRecipes),
+    matches: buildMatches(ingredients, formalRecipes, settings, ingredientsByName),
     drafts,
   };
 }
@@ -460,7 +802,7 @@ function toRecipe(recipe, ingredientsByRecipe, stepsByRecipe) {
   };
 }
 
-function buildMatches(ingredients, recipes) {
+function buildMatches(ingredients, recipes, settings = defaultFamilySettings(), ingredientsByName = new Map(ingredients.map((item) => [item.name, item]))) {
   const available = new Set(ingredients.map((item) => item.name));
   const pantry = new Set(PANTRY);
   const priority = new Set(ingredients.filter((item) => item.state === "priority" || item.state === "expiring")
@@ -474,9 +816,15 @@ function buildMatches(ingredients, recipes) {
       missing,
       usesPriority: required.some((item) => priority.has(item.name)),
       substitutions: missing.flatMap((name) => substituteFor(name)),
+      pregnancyWarning: evaluateRecipePregnancy(recipe, ingredientsByName),
     };
   }).sort((a, b) => {
     if (a.missing.length !== b.missing.length) return a.missing.length - b.missing.length;
+    if (settings.pregnancyMode) {
+      const aAvoid = a.pregnancyWarning?.level === "avoid" ? 1 : 0;
+      const bAvoid = b.pregnancyWarning?.level === "avoid" ? 1 : 0;
+      if (aAvoid !== bAvoid) return aAvoid - bAvoid;
+    }
     if (Boolean(a.preferenceWarning) !== Boolean(b.preferenceWarning)) return a.preferenceWarning ? 1 : -1;
     return a.minutes - b.minutes;
   });
@@ -789,6 +1137,11 @@ function sanitizeIngredientItems(items, { includeQuantity = false } = {}) {
       category: normalizeCategory(item?.category || classifyIngredient(name)),
       state: normalizeState(item?.state),
     };
+    const pregLevel = normalizePregnancyLevel(item?.pregnancyLevel);
+    if (pregLevel) {
+      ingredient.pregnancyLevel = pregLevel;
+      ingredient.pregnancyNote = String(item?.pregnancyNote || "").trim().slice(0, 80);
+    }
     if (includeQuantity) {
       ingredient.quantityLabel = String(item?.quantityLabel || item?.quantity || "").trim().slice(0, 20);
     }

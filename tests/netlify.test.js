@@ -382,6 +382,139 @@ test("Netlify Function retries optimistic concurrency conflicts", async () => {
   assert.equal(created.payload.ingredients.some((item) => item.name === "西兰花"), true);
 });
 
+test("Netlify Function supports pregnancy safety, settings, manual recipes, meal planner, and shopping commit", async () => {
+  const store = new MemoryBlobStore();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const userPrompt = String(body.messages.at(-1)?.content || "");
+    if (userPrompt.includes("shoppingItems")) {
+      return Response.json({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              title: "下顿 2 道菜 + 主食买菜方案",
+              summary: "孕期营养均衡，补铁补叶酸",
+              staple: "杂粮米饭",
+              meals: [
+                {
+                  title: "蒜蓉油麦菜",
+                  method: "炒",
+                  minutes: 10,
+                  reason: "清爽绿叶菜",
+                  pregnancyTip: "清洗干净炒熟",
+                  requiredIngredients: [{ name: "油麦菜", quantityLabel: "1把" }],
+                  optionalIngredients: [{ name: "盐", quantityLabel: "少许" }],
+                  steps: ["油麦菜洗净切段。", "大火快炒2分钟调味。"],
+                },
+                {
+                  title: "清蒸鲈鱼",
+                  method: "蒸",
+                  minutes: 18,
+                  reason: "优质蛋白低汞",
+                  pregnancyTip: "务必彻底蒸熟",
+                  requiredIngredients: [{ name: "鲈鱼", quantityLabel: "1条" }],
+                  optionalIngredients: [{ name: "生抽", quantityLabel: "2勺" }],
+                  steps: ["鲈鱼改刀抹盐。", "水开蒸10分钟焖2分钟。"],
+                },
+              ],
+              shoppingItems: [
+                { name: "油麦菜", category: "蔬菜", quantityLabel: "1把", forDishes: ["蒜蓉油麦菜"] },
+                { name: "鲈鱼", category: "肉禽蛋", quantityLabel: "1条", forDishes: ["清蒸鲈鱼"] },
+              ],
+            }),
+          },
+        }],
+      });
+    }
+    return Response.json({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            pregnancyLevel: "caution",
+            pregnancyNote: "冷门食材示例：孕期建议少量熟食",
+          }),
+        },
+      }],
+    });
+  };
+
+  try {
+    const handler = createApiHandler({
+      store,
+      env: { FAMILY_ACCESS_CODE: "test-family", DEEPSEEK_API_KEY: "ds-key" },
+    });
+
+    // Known avoid ingredient uses curated rule immediately
+    const avoidAdd = await callApi(handler, "/api/ingredients", {
+      method: "POST",
+      body: { name: "溏心蛋", category: "肉禽蛋" },
+    });
+    assert.equal(avoidAdd.status, 200);
+    assert.equal(avoidAdd.payload.addedIngredients[0].pregnancyLevel, "avoid");
+
+    // Unknown exotic ingredient falls back to DeepSeek evaluation
+    const unknownAdd = await callApi(handler, "/api/ingredients", {
+      method: "POST",
+      body: { name: "冰草嫩芽", category: "蔬菜" },
+    });
+    assert.equal(unknownAdd.status, 200);
+    assert.equal(unknownAdd.payload.addedIngredients[0].pregnancyLevel, "caution");
+    assert.equal(unknownAdd.payload.addedIngredients[0].pregnancyNote.includes("冷门食材"), true);
+
+    // Update settings
+    const settingsRes = await callApi(handler, "/api/settings", {
+      method: "PATCH",
+      body: { pregnancyMode: true, dietaryNotes: "孕晚期控糖" },
+    });
+    assert.equal(settingsRes.status, 200);
+    assert.equal(settingsRes.payload.settings.dietaryNotes, "孕晚期控糖");
+
+    // Manual recipe creation
+    const manualRes = await callApi(handler, "/api/recipes", {
+      method: "POST",
+      body: {
+        title: "清蒸鸡胸肉",
+        method: "蒸",
+        minutes: 15,
+        ingredients: [{ name: "鸡胸肉", quantityLabel: "1块", required: true }],
+        steps: ["鸡胸肉切片蒸15分钟。"],
+      },
+    });
+    assert.equal(manualRes.status, 200);
+    assert.equal(manualRes.payload.recipe.title, "清蒸鸡胸肉");
+
+    // AI shopping plan suggestion
+    const planRes = await callApi(handler, "/api/meal-plan/suggest", {
+      method: "POST",
+      body: { mode: "shopping_plan", dishCount: 2, mealsCount: 1, shoppingMode: "fresh" },
+    });
+    assert.equal(planRes.status, 200);
+    assert.equal(planRes.payload.plan.generatedBy, "ai");
+    assert.equal(planRes.payload.plan.shoppingItems.length, 2);
+
+    // Save & commit shopping list
+    const savePlan = await callApi(handler, "/api/shopping-plan", {
+      method: "PUT",
+      body: {
+        ...planRes.payload.plan,
+        items: planRes.payload.plan.shoppingItems.map((item) => ({ ...item, checked: true })),
+      },
+    });
+    assert.equal(savePlan.status, 200);
+    const commitRes = await callApi(handler, "/api/shopping-plan/commit", {
+      method: "POST",
+      body: { saveMeals: true },
+    });
+    assert.equal(commitRes.status, 200);
+    assert.equal(commitRes.payload.addedIngredients.length, 2);
+    assert.equal(commitRes.payload.savedRecipeIds.length, 2);
+    assert.equal(commitRes.payload.shoppingPlan, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 async function callApi(handler, pathname, options = {}) {
   const response = await handler(new Request(`https://happy-eat.netlify.app${pathname}`, {
     method: options.method || "GET",

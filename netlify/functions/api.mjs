@@ -1,5 +1,20 @@
 import { getStore } from "@netlify/blobs";
 import { randomUUID } from "node:crypto";
+import {
+  buildMealPlanMessages,
+  buildSingleIngredientPregnancyMessages,
+  normalizeLlmPregnancyEvaluation,
+  sanitizeLlmMealPlan,
+} from "../../shared/mealPlanner.js";
+import {
+  buildLocalMealSuggestions,
+  defaultFamilySettings,
+  evaluateIngredientPregnancy,
+  evaluateRecipePregnancy,
+  normalizePregnancyLevel,
+  sanitizeShoppingPlan,
+  sanitizeSuggestedMeal,
+} from "../../shared/pregnancy.js";
 
 const STATE_STORE = "happy-eat-state";
 const STATE_KEY = "main";
@@ -56,6 +71,26 @@ export function createApiHandler({ store, env } = {}) {
 
       if (request.method === "GET" && pathname === "/api/app") {
         return json(buildApp(await readState(activeStore), getEnv));
+      }
+
+      if (request.method === "PATCH" && pathname === "/api/settings") {
+        return await handleUpdateSettings(request, activeStore, getEnv);
+      }
+
+      if (request.method === "POST" && pathname === "/api/meal-plan/suggest") {
+        return await handleSuggestMealPlan(request, activeStore, getEnv);
+      }
+
+      if (request.method === "PUT" && pathname === "/api/shopping-plan") {
+        return await handleUpdateShoppingPlan(request, activeStore, getEnv);
+      }
+
+      if (request.method === "POST" && pathname === "/api/shopping-plan/commit") {
+        return await handleCommitShoppingPlan(request, activeStore, getEnv);
+      }
+
+      if (request.method === "POST" && pathname === "/api/recipes") {
+        return await handleCreateRecipe(request, activeStore, getEnv);
       }
 
       if (request.method === "POST" && pathname === "/api/audio/transcriptions") {
@@ -274,6 +309,7 @@ async function handleCreateIngredient(request, store, getEnv) {
   const categoryInput = String(body?.category || "").trim();
   const category = categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name);
   const stateValue = normalizeState(body?.state);
+  const pregnancy = await assessSingleIngredientPregnancy(name, getEnv);
 
   const state = await mutateState(store, (draft) => {
     if (draft.ingredients.some((item) => item.name === name)) {
@@ -284,35 +320,320 @@ async function handleCreateIngredient(request, store, getEnv) {
       name,
       category,
       state: stateValue,
+      pregnancyLevel: pregnancy.level,
+      pregnancyNote: pregnancy.note,
     });
   });
 
-  return json(buildApp(state, getEnv));
+  return json({
+    ...buildApp(state, getEnv),
+    addedIngredients: [
+      {
+        name,
+        category,
+        state: stateValue,
+        pregnancyLevel: pregnancy.level,
+        pregnancyNote: pregnancy.note,
+      },
+    ],
+  });
 }
 
 async function handleCreateIngredientsBatch(request, store, getEnv) {
   const body = await readJson(request);
   const parsed = await parseIngredientInput(body?.text || "", getEnv);
-  const state = parsed.length > 0
+  const enriched = [];
+  for (const item of parsed) {
+    let preg = evaluateIngredientPregnancy(item.name, {
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    });
+    if (preg.level === "unknown") {
+      preg = await assessSingleIngredientPregnancy(item.name, getEnv);
+    }
+    enriched.push({
+      ...item,
+      pregnancyLevel: preg.level,
+      pregnancyNote: preg.note,
+    });
+  }
+
+  const state = enriched.length > 0
     ? await mutateState(store, (draft) => {
-      for (const item of parsed) {
+      for (const item of enriched) {
         const existing = draft.ingredients.find((ingredient) => ingredient.name === item.name);
         if (existing) {
           existing.category = item.category;
           if (item.state !== "none") existing.state = item.state;
+          if (item.pregnancyLevel && item.pregnancyLevel !== "unknown") {
+            existing.pregnancyLevel = item.pregnancyLevel;
+            existing.pregnancyNote = item.pregnancyNote;
+          }
         } else {
           draft.ingredients.push({
             id: nextId(draft.ingredients),
             name: item.name,
             category: item.category,
             state: item.state,
+            pregnancyLevel: item.pregnancyLevel,
+            pregnancyNote: item.pregnancyNote,
           });
         }
       }
     })
     : await readState(store);
 
+  return json({
+    ...buildApp(state, getEnv),
+    addedIngredients: enriched.map((item) => ({
+      name: item.name,
+      category: item.category,
+      state: item.state,
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    })),
+  });
+}
+
+async function handleUpdateSettings(request, store, getEnv) {
+  const body = await readJson(request);
+  const state = await mutateState(store, (draft) => {
+    const current = defaultFamilySettings(draft.settings);
+    draft.settings = defaultFamilySettings({
+      pregnancyMode: Object.hasOwn(body || {}, "pregnancyMode") ? Boolean(body.pregnancyMode) : current.pregnancyMode,
+      dietaryNotes: Object.hasOwn(body || {}, "dietaryNotes") ? String(body.dietaryNotes || "") : current.dietaryNotes,
+      defaultMealStyle: Object.hasOwn(body || {}, "defaultMealStyle")
+        ? String(body.defaultMealStyle || "")
+        : current.defaultMealStyle,
+    });
+  });
   return json(buildApp(state, getEnv));
+}
+
+async function handleCreateRecipe(request, store, getEnv) {
+  const body = await readJson(request);
+  const title = String(body?.title || "").trim().slice(0, 40);
+  const rawIngredients = Array.isArray(body?.ingredients) ? body.ingredients : [];
+  const ingredients = rawIngredients.map((item) => {
+    const sanitized = sanitizeIngredientItems([item], { includeQuantity: true })[0];
+    return sanitized ? { name: sanitized.name, quantityLabel: sanitized.quantityLabel, required: Boolean(item.required) } : null;
+  }).filter(Boolean);
+  const rawSteps = Array.isArray(body?.steps) ? body.steps.slice(0, 12) : [];
+  const steps = rawSteps.map((step) => (typeof step === "string" ? step : String(step?.text || "")).trim()).filter(Boolean);
+
+  if (!title || ingredients.length === 0 || ingredients.length !== rawIngredients.length
+    || steps.length === 0 || steps.length !== rawSteps.length) {
+    return json({ error: "请填写标题、食材和烹饪步骤" }, 422);
+  }
+
+  const status = body?.status === "draft" ? "draft" : "formal";
+  const sourceType = ["manual", "planned", "generated", "text", "web", "image"].includes(body?.sourceType)
+    ? body.sourceType
+    : "manual";
+  let createdId = null;
+
+  const state = await mutateState(store, (draft) => {
+    createdId = nextId(draft.recipes);
+    draft.recipes.push({
+      id: createdId,
+      title,
+      method: normalizeMethod(body?.method),
+      minutes: clampMinutes(body?.minutes),
+      preferenceWarning: String(body?.preferenceWarning || "").trim().slice(0, 30),
+      status,
+      sourceType,
+      sourceText: String(body?.sourceText || "").slice(0, 1000),
+      ingredients,
+      steps,
+    });
+  });
+
+  const app = buildApp(state, getEnv);
+  const saved = status === "draft"
+    ? app.drafts.find((r) => r.id === createdId)
+    : [...app.matches.ready, ...app.matches.missing].find((r) => r.id === createdId);
+  return json({ recipe: saved, app });
+}
+
+async function handleSuggestMealPlan(request, store, getEnv) {
+  const body = await readJson(request, { allowEmpty: true });
+  const mode = body?.mode === "shopping_plan" ? "shopping_plan" : "use_existing";
+  const dishCount = Math.max(1, Math.min(4, Number(body?.dishCount) || 2));
+  const includeStaple = body?.includeStaple === undefined ? true : Boolean(body.includeStaple);
+  const mealsCount = Math.max(1, Math.min(3, Number(body?.mealsCount) || 1));
+  const style = String(body?.style || "").trim().slice(0, 40);
+  const maxMinutes = Math.max(0, Math.min(180, Number(body?.maxMinutes) || 0));
+  const excludeTitles = Array.isArray(body?.excludeTitles)
+    ? body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 15)
+    : [];
+  const shoppingMode = body?.shoppingMode === "fresh" ? "fresh" : "top_up";
+
+  const currentState = await readState(store);
+  const app = buildApp(currentState, getEnv);
+  const formalRecipes = [...app.matches.ready, ...app.matches.missing];
+  const params = {
+    mode,
+    ingredients: app.ingredients,
+    formalRecipes,
+    settings: app.settings,
+    dishCount,
+    includeStaple,
+    mealsCount,
+    style,
+    maxMinutes,
+    excludeTitles,
+    shoppingMode,
+  };
+
+  const textLlm = resolveTextLlmConfig(getEnv);
+  if (!textLlm || (mode === "use_existing" && app.ingredients.length === 0)) {
+    return json({ plan: buildLocalMealSuggestions(params) });
+  }
+
+  const messages = buildMealPlanMessages(params);
+  const raw = await callLlmJson(textLlm, messages);
+  return json({ plan: sanitizeLlmMealPlan(raw, params) });
+}
+
+async function handleUpdateShoppingPlan(request, store, getEnv) {
+  const body = await readJson(request, { allowEmpty: true });
+  const state = await mutateState(store, (draft) => {
+    if (body?.clear) {
+      draft.shoppingPlan = null;
+      return;
+    }
+    const ingMap = new Map((draft.ingredients || []).map((item) => [item.name, item]));
+    draft.shoppingPlan = sanitizeShoppingPlan(body, ingMap);
+  });
+  return json(buildApp(state, getEnv));
+}
+
+async function handleCommitShoppingPlan(request, store, getEnv) {
+  const body = await readJson(request, { allowEmpty: true });
+  const requestedIds = Array.isArray(body?.itemIds) ? new Set(body.itemIds.map(String)) : null;
+  const saveMeals = Boolean(body?.saveMeals);
+  const currentState = await readState(store);
+  const currentPlan = currentState.shoppingPlan;
+  if (!currentPlan || !Array.isArray(currentPlan.items)) {
+    return json({ ...buildApp(currentState, getEnv), addedIngredients: [], savedRecipeIds: [] });
+  }
+
+  const toCommit = currentPlan.items.filter((item) =>
+    requestedIds ? requestedIds.has(String(item.id)) : Boolean(item.checked),
+  );
+  if (toCommit.length === 0 && !saveMeals) {
+    return json({ error: "请先勾选已买到的食材" }, 422);
+  }
+
+  const evaluatedItems = [];
+  for (const item of toCommit) {
+    const name = normalizeIngredientName(item.name);
+    if (!name) continue;
+    let preg = evaluateIngredientPregnancy(name, {
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    });
+    if (preg.level === "unknown") {
+      preg = await assessSingleIngredientPregnancy(name, getEnv);
+    }
+    evaluatedItems.push({
+      id: item.id,
+      name,
+      category: normalizeCategory(item.category || classifyIngredient(name)),
+      state: "none",
+      pregnancyLevel: preg.level,
+      pregnancyNote: preg.note,
+    });
+  }
+
+  const committedIdSet = new Set(toCommit.map((item) => String(item.id)));
+  const savedRecipeIds = [];
+
+  const state = await mutateState(store, (draft) => {
+    savedRecipeIds.length = 0;
+    for (const item of evaluatedItems) {
+      const existing = draft.ingredients.find((ing) => ing.name === item.name);
+      if (existing) {
+        existing.category = item.category;
+        if (item.pregnancyLevel && item.pregnancyLevel !== "unknown") {
+          existing.pregnancyLevel = item.pregnancyLevel;
+          existing.pregnancyNote = item.pregnancyNote;
+        }
+      } else {
+        draft.ingredients.push({
+          id: nextId(draft.ingredients),
+          name: item.name,
+          category: item.category,
+          state: "none",
+          pregnancyLevel: item.pregnancyLevel,
+          pregnancyNote: item.pregnancyNote,
+        });
+      }
+    }
+
+    if (saveMeals && Array.isArray(draft.shoppingPlan?.meals)) {
+      const existingFormalTitles = new Set(
+        draft.recipes.filter((r) => r.status === "formal").map((r) => r.title),
+      );
+      for (const rawMeal of draft.shoppingPlan.meals) {
+        const meal = sanitizeSuggestedMeal(rawMeal);
+        if (!meal || existingFormalTitles.has(meal.title)) continue;
+        existingFormalTitles.add(meal.title);
+        const newId = nextId(draft.recipes);
+        draft.recipes.push({
+          id: newId,
+          title: meal.title,
+          method: normalizeMethod(meal.method),
+          minutes: clampMinutes(meal.minutes),
+          preferenceWarning: meal.preferenceWarning || "",
+          status: "formal",
+          sourceType: "planned",
+          sourceText: meal.reason || "",
+          ingredients: meal.ingredients,
+          steps: meal.steps.map((s) => s.text),
+        });
+        savedRecipeIds.push(newId);
+      }
+    }
+
+    if (draft.shoppingPlan) {
+      const remainingItems = (draft.shoppingPlan.items || []).filter((item) => !committedIdSet.has(String(item.id)));
+      if (remainingItems.length === 0) {
+        draft.shoppingPlan = null;
+      } else {
+        draft.shoppingPlan = {
+          ...draft.shoppingPlan,
+          items: remainingItems,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    }
+  });
+
+  return json({
+    ...buildApp(state, getEnv),
+    addedIngredients: evaluatedItems.map((item) => ({
+      name: item.name,
+      category: item.category,
+      state: item.state,
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    })),
+    savedRecipeIds,
+  });
+}
+
+async function assessSingleIngredientPregnancy(name, getEnv) {
+  const local = evaluateIngredientPregnancy(name);
+  if (local.level !== "unknown") return local;
+  const llm = resolveTextLlmConfig(getEnv);
+  if (!llm) return local;
+  try {
+    const result = await callLlmJson(llm, buildSingleIngredientPregnancyMessages(name));
+    return normalizeLlmPregnancyEvaluation(result, name);
+  } catch {
+    return local;
+  }
 }
 
 async function handleUpdateIngredient(request, store, getEnv, id) {
@@ -328,9 +649,15 @@ async function handleUpdateIngredient(request, store, getEnv, id) {
     }
 
     const categoryInput = String(body?.category ?? ingredient.category).trim();
+    const renamed = name !== ingredient.name;
     ingredient.name = name;
     ingredient.category = categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name);
     ingredient.state = normalizeState(body?.state ?? ingredient.state);
+    if (renamed) {
+      const preg = evaluateIngredientPregnancy(name);
+      ingredient.pregnancyLevel = preg.level;
+      ingredient.pregnancyNote = preg.note;
+    }
   });
 
   return json(buildApp(state, getEnv));
@@ -373,10 +700,11 @@ async function handleGenerateRecipe(request, store, getEnv) {
   }
 
   const currentState = await readState(store);
+  const settings = defaultFamilySettings(currentState.settings);
   const priorityOrder = { expiring: 0, priority: 1 };
   const selected = (ingredientIds.length > 0
     ? currentState.ingredients.filter((item) => ingredientIds.includes(Number(item.id)))
-    : [...currentState.ingredients]
+    : currentState.ingredients.filter((item) => !settings.pregnancyMode || evaluateIngredientPregnancy(item.name, item).level !== "avoid")
   ).sort((a, b) => {
     const rankDiff = (priorityOrder[a.state] ?? 2) - (priorityOrder[b.state] ?? 2);
     return rankDiff !== 0 ? rankDiff : a.name.localeCompare(b.name, "zh-CN");
@@ -388,7 +716,7 @@ async function handleGenerateRecipe(request, store, getEnv) {
   }
 
   const sourceText = formatAvailableIngredients(selected);
-  const recipe = await buildRecipeDraft("generated", sourceText, "", getEnv, selected);
+  const recipe = await buildRecipeDraft("generated", sourceText, "", getEnv, selected, settings);
   const state = await mutateState(store, (draft) => {
     recipe.id = nextId(draft.recipes);
     draft.recipes.push(recipe);
@@ -540,15 +868,36 @@ async function mutateState(store, mutator) {
 }
 
 function buildApp(state, getEnv) {
-  const ingredients = [...(state.ingredients || [])].sort((a, b) => {
-    const categoryDiff = a.category.localeCompare(b.category, "zh-CN");
-    return categoryDiff !== 0 ? categoryDiff : a.name.localeCompare(b.name, "zh-CN");
-  });
+  const settings = defaultFamilySettings(state.settings);
+  const ingredients = [...(state.ingredients || [])]
+    .map((item) => {
+      const preg = evaluateIngredientPregnancy(item.name, item);
+      return {
+        ...item,
+        pregnancyLevel: preg.level,
+        pregnancyNote: preg.note,
+      };
+    })
+    .sort((a, b) => {
+      const categoryDiff = a.category.localeCompare(b.category, "zh-CN");
+      return categoryDiff !== 0 ? categoryDiff : a.name.localeCompare(b.name, "zh-CN");
+    });
+  const ingredientsByName = new Map(ingredients.map((item) => [item.name, item]));
   const recipesDesc = [...(state.recipes || [])].sort((a, b) => Number(b.id) - Number(a.id));
   const formal = recipesDesc.filter((recipe) => recipe.status === "formal").map(publicRecipe);
-  const drafts = recipesDesc.filter((recipe) => recipe.status === "draft").map(publicRecipe);
-  const decorated = formal.map((recipe) => decorateRecipe(recipe, ingredients)).sort((a, b) => {
+  const drafts = recipesDesc
+    .filter((recipe) => recipe.status === "draft")
+    .map((recipe) => {
+      const pub = publicRecipe(recipe);
+      return { ...pub, pregnancyWarning: evaluateRecipePregnancy(pub, ingredientsByName) };
+    });
+  const decorated = formal.map((recipe) => decorateRecipe(recipe, ingredients, ingredientsByName)).sort((a, b) => {
     if (a.missing.length !== b.missing.length) return a.missing.length - b.missing.length;
+    if (settings.pregnancyMode) {
+      const aAvoid = a.pregnancyWarning?.level === "avoid" ? 1 : 0;
+      const bAvoid = b.pregnancyWarning?.level === "avoid" ? 1 : 0;
+      if (aAvoid !== bAvoid) return aAvoid - bAvoid;
+    }
     if (Boolean(a.preferenceWarning) !== Boolean(b.preferenceWarning)) return a.preferenceWarning ? 1 : -1;
     return a.minutes - b.minutes;
   });
@@ -558,6 +907,8 @@ function buildApp(state, getEnv) {
   const asrConfig = resolveAsrConfig(getEnv);
   return {
     family: { name: state.familyName || "张家", accessMode: "家庭访问码" },
+    settings,
+    shoppingPlan: sanitizeShoppingPlan(state.shoppingPlan, ingredientsByName),
     ai: {
       configured: Boolean(textLlm),
       textModel: textLlm?.model || DEFAULT_DEEPSEEK_TEXT_MODEL,
@@ -598,7 +949,7 @@ function publicRecipe(recipe) {
   };
 }
 
-function decorateRecipe(recipe, ingredients) {
+function decorateRecipe(recipe, ingredients, ingredientsByName = new Map(ingredients.map((item) => [item.name, item]))) {
   const available = new Set(ingredients.map((item) => item.name));
   const pantry = new Set(PANTRY);
   const priority = new Set(
@@ -611,6 +962,7 @@ function decorateRecipe(recipe, ingredients) {
     missing,
     usesPriority: required.some((item) => priority.has(item.name)),
     substitutions: missing.flatMap((name) => substituteFor(name)),
+    pregnancyWarning: evaluateRecipePregnancy(recipe, ingredientsByName),
   };
 }
 
@@ -693,11 +1045,12 @@ async function parseIngredientInput(text, getEnv) {
       role: "system",
       content: [
         "你是家庭厨房食材录入助手。",
-        "从用户的自然语言中提取可用食材清单。",
+        "从用户的自然语言中提取可用食材清单，同时评估每种食材孕期是否适合食用。",
         "返回且只返回 JSON，不要 Markdown。",
-        "JSON 结构：{\"ingredients\":[{\"name\":\"番茄\",\"category\":\"蔬菜\",\"state\":\"none\"}]}。",
+        "JSON 结构：{\"ingredients\":[{\"name\":\"番茄\",\"category\":\"蔬菜\",\"state\":\"none\",\"pregnancyLevel\":\"safe\",\"pregnancyNote\":\"常见蔬果，孕期可正常食用\"}]}。",
         "category 只能是：蔬菜、肉禽蛋、主食、调味、乳品、其他。",
         "state 只能是：priority、expiring、frozen、none。",
+        "pregnancyLevel 只能是：safe（适合孕期）、caution（孕期慎吃/需限量或注意做法）、avoid（生食/酒精/高汞/高风险建议避免）。",
         "看到优先用掉、剩、今天用，state=priority；看到快过期、快坏，state=expiring；看到冷冻、冻，state=frozen。",
         "把同义食材归一为常见名称，例如西红柿归一为番茄，马铃薯归一为土豆，酱油按语境归一为生抽。",
         "数量和单位只用于识别食材名称，不要返回数量字段。",
@@ -721,12 +1074,12 @@ function parseIngredientText(text) {
     }).filter((item) => item.name.length > 0);
 }
 
-async function buildRecipeDraft(sourceType, sourceText, imageDataUrl, getEnv, generatedIngredients = []) {
+async function buildRecipeDraft(sourceType, sourceText, imageDataUrl, getEnv, generatedIngredients = [], settings = defaultFamilySettings()) {
   const textLlm = resolveTextLlmConfig(getEnv);
   const visionLlm = resolveVisionLlmConfig(getEnv);
   let extracted;
   if (sourceType === "generated") {
-    extracted = await generateRecipeWithLLM(sourceText, textLlm);
+    extracted = await generateRecipeWithLLM(sourceText, textLlm, settings);
   } else if (imageDataUrl) {
     if (!/^data:image\/(jpeg|jpg|png|gif|webp);base64,[A-Za-z0-9+/=]+$/i.test(imageDataUrl)) {
       throw httpError(422, "仅支持 JPG、PNG、WebP 或 GIF 格式的菜谱图片");
@@ -802,19 +1155,21 @@ function normalizeConsumptions(value) {
   });
 }
 
-async function generateRecipeWithLLM(sourceText, llm) {
+async function generateRecipeWithLLM(sourceText, llm, settings = defaultFamilySettings()) {
   const prompt = [
     "请根据家庭现有食材设计一道实际可做的中式家常菜。",
     `现有食材：${sourceText}`,
     `常备调料：${PANTRY.join("、")}。`,
     "优先使用标记为快过期或优先用掉的食材。",
+    settings.pregnancyMode ? "孕期饮食守护已开启：请确保做法适合孕期食用，肉蛋海鲜务必彻底煮熟，避免生食、酒精及偏辣重口。" : "",
+    settings.dietaryNotes ? `家庭额外饮食备注：${settings.dietaryNotes}。` : "",
     "requiredIngredients 只能使用现有食材；常备调料放入 optionalIngredients。",
     "不要把家里没有的食材列为必需食材。步骤要具体、简短并适合家庭烹饪。",
     "返回且只返回 JSON，不要 Markdown。",
     "JSON 结构：",
     "{\"title\":\"番茄炒蛋\",\"method\":\"炒\",\"minutes\":15,\"preferenceWarning\":\"\",\"requiredIngredients\":[{\"name\":\"番茄\",\"quantityLabel\":\"2个\"}],\"optionalIngredients\":[{\"name\":\"生抽\",\"quantityLabel\":\"1勺\"}],\"steps\":[\"番茄切块。\"]}",
     "method 只能是：炒、煮、蒸、煎、烤、凉拌、炖、其他。",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   return callLlmJson(llm, [
     { role: "system", content: "你是家庭厨师，擅长利用现有食材生成简单可靠的中文菜谱。" },
@@ -1067,6 +1422,11 @@ function sanitizeIngredientItems(items, { includeQuantity = false } = {}) {
       category: normalizeCategory(item?.category || classifyIngredient(name)),
       state: normalizeState(item?.state),
     };
+    const pregLevel = normalizePregnancyLevel(item?.pregnancyLevel);
+    if (pregLevel) {
+      ingredient.pregnancyLevel = pregLevel;
+      ingredient.pregnancyNote = String(item?.pregnancyNote || "").trim().slice(0, 80);
+    }
     if (includeQuantity) {
       ingredient.quantityLabel = String(item?.quantityLabel || item?.quantity || "").trim().slice(0, 20);
     }

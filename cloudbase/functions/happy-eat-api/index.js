@@ -1,6 +1,21 @@
 import cloudbase from "@cloudbase/node-sdk";
 import express from "express";
 import { randomUUID } from "node:crypto";
+import {
+  buildMealPlanMessages,
+  buildSingleIngredientPregnancyMessages,
+  normalizeLlmPregnancyEvaluation,
+  sanitizeLlmMealPlan,
+} from "./mealPlanner.js";
+import {
+  buildLocalMealSuggestions,
+  defaultFamilySettings,
+  evaluateIngredientPregnancy,
+  evaluateRecipePregnancy,
+  normalizePregnancyLevel,
+  sanitizeShoppingPlan,
+  sanitizeSuggestedMeal,
+} from "./pregnancy.js";
 
 const STATE_COLLECTION = "happy_eat_state";
 const STATE_DOCUMENT = "main";
@@ -49,6 +64,212 @@ app.get("/api/app", route(async (_req, res) => {
   res.json(buildApp(await readState()));
 }));
 
+app.patch("/api/settings", route(async (req, res) => {
+  const state = await mutateState((draft) => {
+    const current = defaultFamilySettings(draft.settings);
+    draft.settings = defaultFamilySettings({
+      pregnancyMode: Object.hasOwn(req.body || {}, "pregnancyMode") ? Boolean(req.body.pregnancyMode) : current.pregnancyMode,
+      dietaryNotes: Object.hasOwn(req.body || {}, "dietaryNotes") ? String(req.body.dietaryNotes || "") : current.dietaryNotes,
+      defaultMealStyle: Object.hasOwn(req.body || {}, "defaultMealStyle")
+        ? String(req.body.defaultMealStyle || "")
+        : current.defaultMealStyle,
+    });
+  });
+  res.json(buildApp(state));
+}));
+
+app.post("/api/recipes", route(async (req, res) => {
+  const title = String(req.body?.title || "").trim().slice(0, 40);
+  const rawIngredients = Array.isArray(req.body?.ingredients) ? req.body.ingredients : [];
+  const ingredients = rawIngredients.map((item) => {
+    const sanitized = sanitizeIngredients([item], true)[0];
+    return sanitized ? { name: sanitized.name, quantityLabel: sanitized.quantityLabel, required: Boolean(item.required) } : null;
+  }).filter(Boolean);
+  const rawSteps = Array.isArray(req.body?.steps) ? req.body.steps.slice(0, 12) : [];
+  const steps = rawSteps.map((step) => (typeof step === "string" ? step : String(step?.text || "")).trim()).filter(Boolean);
+  if (!title || !ingredients.length || ingredients.length !== rawIngredients.length || !steps.length || steps.length !== rawSteps.length) {
+    throw httpError(422, "请填写标题、食材和烹饪步骤");
+  }
+  const status = req.body?.status === "draft" ? "draft" : "formal";
+  const sourceType = ["manual", "planned", "generated", "text", "web", "image"].includes(req.body?.sourceType) ? req.body.sourceType : "manual";
+  let createdId = null;
+  const state = await mutateState((draft) => {
+    createdId = nextId(draft.recipes);
+    draft.recipes.push({
+      id: createdId,
+      title,
+      method: normalizeMethod(req.body?.method),
+      minutes: clampMinutes(req.body?.minutes),
+      preferenceWarning: String(req.body?.preferenceWarning || "").trim().slice(0, 30),
+      status,
+      sourceType,
+      sourceText: String(req.body?.sourceText || "").slice(0, 1000),
+      ingredients,
+      steps,
+    });
+  });
+  const appState = buildApp(state);
+  const saved = status === "draft"
+    ? appState.drafts.find((item) => item.id === createdId)
+    : [...appState.matches.ready, ...appState.matches.missing].find((item) => item.id === createdId);
+  res.json({ recipe: saved, app: appState });
+}));
+
+app.post("/api/meal-plan/suggest", route(async (req, res) => {
+  const mode = req.body?.mode === "shopping_plan" ? "shopping_plan" : "use_existing";
+  const dishCount = Math.max(1, Math.min(4, Number(req.body?.dishCount) || 2));
+  const includeStaple = req.body?.includeStaple === undefined ? true : Boolean(req.body.includeStaple);
+  const mealsCount = Math.max(1, Math.min(3, Number(req.body?.mealsCount) || 1));
+  const style = String(req.body?.style || "").trim().slice(0, 40);
+  const maxMinutes = Math.max(0, Math.min(180, Number(req.body?.maxMinutes) || 0));
+  const excludeTitles = Array.isArray(req.body?.excludeTitles)
+    ? req.body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 15)
+    : [];
+  const shoppingMode = req.body?.shoppingMode === "fresh" ? "fresh" : "top_up";
+
+  const appState = buildApp(await readState());
+  const params = {
+    mode,
+    ingredients: appState.ingredients,
+    formalRecipes: [...appState.matches.ready, ...appState.matches.missing],
+    settings: appState.settings,
+    dishCount,
+    includeStaple,
+    mealsCount,
+    style,
+    maxMinutes,
+    excludeTitles,
+    shoppingMode,
+  };
+
+  if (mode === "use_existing" && appState.ingredients.length === 0) {
+    return res.json({ plan: buildLocalMealSuggestions(params) });
+  }
+  const raw = await callCloudBaseJson({
+    model: process.env.CLOUDBASE_TEXT_MODEL || "deepseek-v4-flash",
+    messages: buildMealPlanMessages(params),
+  });
+  res.json({ plan: sanitizeLlmMealPlan(raw, params) });
+}));
+
+app.put("/api/shopping-plan", route(async (req, res) => {
+  const state = await mutateState((draft) => {
+    if (req.body?.clear) {
+      draft.shoppingPlan = null;
+      return;
+    }
+    const ingMap = new Map((draft.ingredients || []).map((item) => [item.name, item]));
+    draft.shoppingPlan = sanitizeShoppingPlan(req.body, ingMap);
+  });
+  res.json(buildApp(state));
+}));
+
+app.post("/api/shopping-plan/commit", route(async (req, res) => {
+  const currentState = await readState();
+  const currentPlan = currentState.shoppingPlan;
+  if (!currentPlan || !Array.isArray(currentPlan.items)) {
+    return res.json({ ...buildApp(currentState), addedIngredients: [], savedRecipeIds: [] });
+  }
+  const requestedIds = Array.isArray(req.body?.itemIds) ? new Set(req.body.itemIds.map(String)) : null;
+  const saveMeals = Boolean(req.body?.saveMeals);
+  const toCommit = currentPlan.items.filter((item) =>
+    requestedIds ? requestedIds.has(String(item.id)) : Boolean(item.checked),
+  );
+  if (toCommit.length === 0 && !saveMeals) throw httpError(422, "请先勾选已买到的食材");
+
+  const evaluatedItems = [];
+  for (const item of toCommit) {
+    const name = normalizeIngredientName(item.name);
+    if (!name) continue;
+    let preg = evaluateIngredientPregnancy(name, { pregnancyLevel: item.pregnancyLevel, pregnancyNote: item.pregnancyNote });
+    if (preg.level === "unknown") preg = await assessSingleIngredientPregnancy(name);
+    evaluatedItems.push({
+      id: item.id,
+      name,
+      category: normalizeCategory(item.category || classifyIngredient(name)),
+      state: "none",
+      pregnancyLevel: preg.level,
+      pregnancyNote: preg.note,
+    });
+  }
+
+  const committedIdSet = new Set(toCommit.map((item) => String(item.id)));
+  const savedRecipeIds = [];
+  const state = await mutateState((draft) => {
+    savedRecipeIds.length = 0;
+    for (const item of evaluatedItems) {
+      const existing = draft.ingredients.find((ing) => ing.name === item.name);
+      if (existing) {
+        existing.category = item.category;
+        if (item.pregnancyLevel && item.pregnancyLevel !== "unknown") {
+          existing.pregnancyLevel = item.pregnancyLevel;
+          existing.pregnancyNote = item.pregnancyNote;
+        }
+      } else {
+        draft.ingredients.push({
+          id: nextId(draft.ingredients),
+          name: item.name,
+          category: item.category,
+          state: "none",
+          pregnancyLevel: item.pregnancyLevel,
+          pregnancyNote: item.pregnancyNote,
+        });
+      }
+    }
+    if (saveMeals && Array.isArray(draft.shoppingPlan?.meals)) {
+      const existingTitles = new Set(draft.recipes.filter((r) => r.status === "formal").map((r) => r.title));
+      for (const rawMeal of draft.shoppingPlan.meals) {
+        const meal = sanitizeSuggestedMeal(rawMeal);
+        if (!meal || existingTitles.has(meal.title)) continue;
+        existingTitles.add(meal.title);
+        const newId = nextId(draft.recipes);
+        draft.recipes.push({
+          id: newId,
+          title: meal.title,
+          method: normalizeMethod(meal.method),
+          minutes: clampMinutes(meal.minutes),
+          preferenceWarning: meal.preferenceWarning || "",
+          status: "formal",
+          sourceType: "planned",
+          sourceText: meal.reason || "",
+          ingredients: meal.ingredients,
+          steps: meal.steps.map((s) => s.text),
+        });
+        savedRecipeIds.push(newId);
+      }
+    }
+    if (draft.shoppingPlan) {
+      const remaining = (draft.shoppingPlan.items || []).filter((item) => !committedIdSet.has(String(item.id)));
+      draft.shoppingPlan = remaining.length === 0 ? null : { ...draft.shoppingPlan, items: remaining, updatedAt: new Date().toISOString() };
+    }
+  });
+  res.json({
+    ...buildApp(state),
+    addedIngredients: evaluatedItems.map((item) => ({
+      name: item.name,
+      category: item.category,
+      state: item.state,
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    })),
+    savedRecipeIds,
+  });
+}));
+
+async function assessSingleIngredientPregnancy(name) {
+  const local = evaluateIngredientPregnancy(name);
+  if (local.level !== "unknown") return local;
+  try {
+    const result = await callCloudBaseJson({
+      model: process.env.CLOUDBASE_TEXT_MODEL || "deepseek-v4-flash",
+      messages: buildSingleIngredientPregnancyMessages(name),
+    });
+    return normalizeLlmPregnancyEvaluation(result, name);
+  } catch {
+    return local;
+  }
+}
+
 app.post("/api/audio/transcriptions", route(async (req, res) => {
   if (!process.env.DASHSCOPE_API_KEY) throw httpError(503, "语音识别尚未配置");
   const audioDataUrl = String(req.body?.audioDataUrl || "");
@@ -65,33 +286,60 @@ app.post("/api/audio/transcriptions", route(async (req, res) => {
 app.post("/api/ingredients", route(async (req, res) => {
   const name = normalizeIngredientName(String(req.body?.name || ""));
   if (!name) throw httpError(422, "请输入食材名称");
+  const categoryInput = String(req.body?.category || "").trim();
+  const category = categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name);
+  const stateValue = normalizeState(req.body?.state);
+  const pregnancy = await assessSingleIngredientPregnancy(name);
   const state = await mutateState((draft) => {
     if (draft.ingredients.some((item) => item.name === name)) throw httpError(409, "这个食材已经在清单里");
-    const categoryInput = String(req.body?.category || "").trim();
     draft.ingredients.push({
       id: nextId(draft.ingredients),
       name,
-      category: categoryInput ? normalizeCategory(categoryInput) : classifyIngredient(name),
-      state: normalizeState(req.body?.state),
+      category,
+      state: stateValue,
+      pregnancyLevel: pregnancy.level,
+      pregnancyNote: pregnancy.note,
     });
   });
-  res.json(buildApp(state));
+  res.json({
+    ...buildApp(state),
+    addedIngredients: [{ name, category, state: stateValue, pregnancyLevel: pregnancy.level, pregnancyNote: pregnancy.note }],
+  });
 }));
 
 app.post("/api/ingredients/batch", route(async (req, res) => {
   const parsed = await parseIngredientInput(req.body?.text || "");
+  const enriched = [];
+  for (const item of parsed) {
+    let preg = evaluateIngredientPregnancy(item.name, { pregnancyLevel: item.pregnancyLevel, pregnancyNote: item.pregnancyNote });
+    if (preg.level === "unknown") preg = await assessSingleIngredientPregnancy(item.name);
+    enriched.push({ ...item, pregnancyLevel: preg.level, pregnancyNote: preg.note });
+  }
   const state = await mutateState((draft) => {
-    for (const item of parsed) {
+    for (const item of enriched) {
       const existing = draft.ingredients.find((ingredient) => ingredient.name === item.name);
       if (existing) {
         existing.category = item.category;
         if (item.state !== "none") existing.state = item.state;
+        if (item.pregnancyLevel && item.pregnancyLevel !== "unknown") {
+          existing.pregnancyLevel = item.pregnancyLevel;
+          existing.pregnancyNote = item.pregnancyNote;
+        }
       } else {
         draft.ingredients.push({ ...item, id: nextId(draft.ingredients) });
       }
     }
   });
-  res.json(buildApp(state));
+  res.json({
+    ...buildApp(state),
+    addedIngredients: enriched.map((item) => ({
+      name: item.name,
+      category: item.category,
+      state: item.state,
+      pregnancyLevel: item.pregnancyLevel,
+      pregnancyNote: item.pregnancyNote,
+    })),
+  });
 }));
 
 app.patch("/api/ingredients/:id", route(async (req, res) => {
@@ -324,23 +572,39 @@ async function updateRecipe(id, status, body) {
 }
 
 function buildApp(state) {
+  const settings = defaultFamilySettings(state.settings);
+  const ingredients = (state.ingredients || []).map((item) => {
+    const preg = evaluateIngredientPregnancy(item.name, item);
+    return { ...item, pregnancyLevel: preg.level, pregnancyNote: preg.note };
+  });
+  const ingredientsByName = new Map(ingredients.map((item) => [item.name, item]));
   const formal = state.recipes.filter((recipe) => recipe.status === "formal").map(publicRecipe);
-  const drafts = state.recipes.filter((recipe) => recipe.status === "draft").map(publicRecipe);
-  const decorated = formal.map((recipe) => decorateRecipe(recipe, state.ingredients)).sort((a, b) => {
+  const drafts = state.recipes.filter((recipe) => recipe.status === "draft").map((recipe) => {
+    const pub = publicRecipe(recipe);
+    return { ...pub, pregnancyWarning: evaluateRecipePregnancy(pub, ingredientsByName) };
+  });
+  const decorated = formal.map((recipe) => decorateRecipe(recipe, ingredients, ingredientsByName)).sort((a, b) => {
     if (a.missing.length !== b.missing.length) return a.missing.length - b.missing.length;
+    if (settings.pregnancyMode) {
+      const aAvoid = a.pregnancyWarning?.level === "avoid" ? 1 : 0;
+      const bAvoid = b.pregnancyWarning?.level === "avoid" ? 1 : 0;
+      if (aAvoid !== bAvoid) return aAvoid - bAvoid;
+    }
     if (Boolean(a.preferenceWarning) !== Boolean(b.preferenceWarning)) return a.preferenceWarning ? 1 : -1;
     return a.minutes - b.minutes;
   });
   return {
     family: { name: state.familyName || "张家", accessMode: "家庭访问码" },
+    settings,
+    shoppingPlan: sanitizeShoppingPlan(state.shoppingPlan, ingredientsByName),
     ai: {
       configured: true,
       textModel: process.env.CLOUDBASE_TEXT_MODEL || "deepseek-v4-flash",
       visionModel: process.env.CLOUDBASE_VISION_MODEL || "qwen3.5-plus",
     },
     pantry: PANTRY,
-    categories: groupIngredients(state.ingredients),
-    ingredients: state.ingredients,
+    categories: groupIngredients(ingredients),
+    ingredients,
     matches: {
       ready: decorated.filter((recipe) => recipe.missing.length === 0),
       missing: decorated.filter((recipe) => recipe.missing.length > 0),
@@ -356,7 +620,7 @@ function publicRecipe(recipe) {
   };
 }
 
-function decorateRecipe(recipe, ingredients) {
+function decorateRecipe(recipe, ingredients, ingredientsByName = new Map(ingredients.map((item) => [item.name, item]))) {
   const available = new Set(ingredients.map((item) => item.name));
   const priority = new Set(ingredients.filter((item) => ["priority", "expiring"].includes(item.state)).map((item) => item.name));
   const missing = recipe.ingredients.filter((item) => item.required && !available.has(item.name) && !PANTRY.includes(item.name))
@@ -366,6 +630,7 @@ function decorateRecipe(recipe, ingredients) {
     missing,
     usesPriority: recipe.ingredients.some((item) => item.required && priority.has(item.name)),
     substitutions: missing.flatMap(substituteFor),
+    pregnancyWarning: evaluateRecipePregnancy(recipe, ingredientsByName),
   };
 }
 
@@ -594,6 +859,11 @@ function sanitizeIngredients(items, includeQuantity = false) {
     const name = normalizeIngredientName(String(item?.name || ""));
     if (!name) return null;
     const result = { name, category: normalizeCategory(item?.category || classifyIngredient(name)), state: normalizeState(item?.state) };
+    const pregLevel = normalizePregnancyLevel(item?.pregnancyLevel);
+    if (pregLevel) {
+      result.pregnancyLevel = pregLevel;
+      result.pregnancyNote = String(item?.pregnancyNote || "").trim().slice(0, 80);
+    }
     if (includeQuantity) result.quantityLabel = String(item?.quantityLabel || item?.quantity || "").trim().slice(0, 20);
     return result;
   }).filter(Boolean).slice(0, 60);

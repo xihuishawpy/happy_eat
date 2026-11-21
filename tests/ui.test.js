@@ -281,3 +281,92 @@ test("家庭成员 can select ingredients for AI recipe generation via Create sh
     await once(llm, "close");
   }
 });
+
+test("家庭成员 can use meal planner, shopping list, manual recipe, and pregnancy alerts on mobile", { skip: process.env.RUN_PLAYWRIGHT_UI !== "1" }, async () => {
+  const server = await startTestServer();
+  let browser;
+
+  try {
+    browser = await launchBrowser();
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const consoleErrors = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+
+    await page.goto(server.baseUrl);
+    await page.getByLabel("家庭访问码").fill(server.accessCode);
+    await page.getByRole("button", { name: "进入" }).click();
+    await page.locator(".hero-card").waitFor();
+
+    // 1. Meal Planner: "帮我想吃什么" (default 2 dishes + staple) -> direct cook
+    await page.getByRole("button", { name: "帮我想吃什么" }).click();
+    const planner = page.getByRole("dialog", { name: "今日点菜与买菜规划" });
+    await planner.getByRole("button", { name: "帮我搭配这顿饭" }).click();
+    await planner.locator(".planner-dish-card").first().waitFor();
+    await planner.getByText("主食搭配：").waitFor();
+
+    // 2. Switch to "没菜了·买什么菜" -> generate shopping plan -> adopt to Today
+    await planner.getByRole("tab", { name: /没菜了/ }).click();
+    await planner.getByRole("button", { name: "生成买菜与菜单方案" }).click();
+    await planner.locator(".planner-shop-row").first().waitFor();
+    await planner.getByRole("button", { name: "采用并同步到买菜清单" }).click();
+    await planner.waitFor({ state: "detached" });
+
+    // 3. Shared Shopping List Card on Today: manual add + check + commit
+    const shoppingCard = page.locator(".shopping-card");
+    await shoppingCard.waitFor();
+    await shoppingCard.getByLabel("手动添加待买食材").fill("生菜");
+    await shoppingCard.getByRole("button", { name: "添加", exact: true }).click();
+    await shoppingCard.getByText("生菜").waitFor();
+    await shoppingCard.locator(".shopping-item-check input").first().check();
+    await shoppingCard.getByRole("button", { name: /一键入库/ }).click();
+
+    // 4. Ingredients tab: live pregnancy alert on single add (生鱼片 = avoid) & batch preview (山楂 = caution)
+    await page.getByRole("button", { name: "食材", exact: true }).click();
+    await page.getByRole("button", { name: "添加食材" }).click();
+    const addDialog = page.getByRole("dialog", { name: "添加食材" });
+    await addDialog.getByLabel("食材名称").fill("生鱼片");
+    await addDialog.getByText("孕期食用提示：孕期避免").waitFor();
+    await addDialog.getByRole("button", { name: "保存食材" }).click();
+    await page.getByRole("alert", { name: "新增食材孕期提醒" }).waitFor();
+    await page.getByRole("button", { name: "关闭孕期提醒" }).click();
+
+    const batchInput = page.getByLabel("自然语言录入食材");
+    await batchInput.fill("山楂、西蓝花");
+    await page.getByRole("button", { name: "识别食材" }).click();
+    await page.getByText("孕期提醒：以下食材需注意").waitFor();
+    await page.getByRole("button", { name: "修改" }).click();
+    await page.getByRole("button", { name: "清空" }).click();
+
+    // 5. Manual recipe creation via "+" sheet
+    await page.getByRole("button", { name: "添加菜谱" }).click();
+    await page.getByRole("button", { name: "手动写一道自家拿手菜" }).click();
+    const manualDialog = page.getByRole("dialog", { name: "手动写菜谱" });
+    await manualDialog.getByLabel("菜谱标题").fill("自家清炒生菜");
+    await manualDialog.getByLabel("食材名称 1").fill("生菜");
+    await manualDialog.getByLabel("食材用量 1").fill("1把");
+    await manualDialog.getByRole("button", { name: "删除食材 2" }).click();
+    await manualDialog.getByLabel("烹饪步骤 1").fill("生菜洗净沥干。");
+    await manualDialog.getByLabel("烹饪步骤 2").fill("大火快炒2分钟加盐出锅。");
+    await manualDialog.getByRole("button", { name: "保存到菜谱库" }).click();
+    await page.getByRole("dialog", { name: "自家清炒生菜" }).waitFor();
+    await page.getByRole("button", { name: "关闭菜谱详情" }).click();
+
+    // 6. Family pregnancy settings & 320px zero overflow
+    await page.setViewportSize({ width: 320, height: 700 });
+    await page.getByRole("button", { name: "家庭", exact: true }).click();
+    await page.getByText("孕期饮食守护").waitFor();
+    await page.getByRole("button", { name: "孕中期" }).click();
+    await page.getByRole("button", { name: "保存家庭饮食备注" }).click();
+
+    for (const tabName of ["今天", "食材", "菜谱", "家庭"]) {
+      await page.getByRole("button", { name: tabName, exact: true }).click();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `${tabName} overflowed`);
+    }
+    assert.deepEqual(consoleErrors, []);
+  } finally {
+    await browser?.close();
+    await server.stop();
+  }
+});

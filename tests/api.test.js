@@ -87,8 +87,9 @@ test("食材状态 can be updated and ingredients can be removed", async () => {
       },
     });
     assert.equal(updated.response.status, 200);
+    const updatedItem = updated.payload.ingredients.find((item) => item.id === winterMelon.id);
     assert.deepEqual(
-      updated.payload.ingredients.find((item) => item.id === winterMelon.id),
+      { id: updatedItem.id, name: updatedItem.name, category: updatedItem.category, state: updatedItem.state },
       {
         id: winterMelon.id,
         name: "贝贝南瓜",
@@ -96,6 +97,7 @@ test("食材状态 can be updated and ingredients can be removed", async () => {
         state: "frozen",
       },
     );
+    assert.equal(updatedItem.pregnancyLevel, "safe");
 
     const removed = await api(server, `/api/ingredients/${winterMelon.id}`, {
       method: "DELETE",
@@ -410,6 +412,104 @@ test("正式菜谱 can be edited and deleted", async () => {
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM recipe_ingredients WHERE recipe_id = ?").get(recipe.id).count, 0);
     assert.equal(database.prepare("SELECT COUNT(*) AS count FROM recipe_steps WHERE recipe_id = ?").get(recipe.id).count, 0);
     database.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("孕期提醒、饮食设置、手动写菜谱与买菜规划闭环 work end-to-end", async () => {
+  const server = await startTestServer();
+
+  try {
+    // 1. Adding an avoid ingredient returns pregnancy assessment
+    const addedAvoid = await api(server, "/api/ingredients", {
+      method: "POST",
+      body: { name: "生鱼片", category: "肉禽蛋", state: "none" },
+    });
+    assert.equal(addedAvoid.response.status, 200);
+    assert.equal(addedAvoid.payload.addedIngredients[0].pregnancyLevel, "avoid");
+    assert.equal(addedAvoid.payload.ingredients.find((i) => i.name === "生鱼片").pregnancyLevel, "avoid");
+
+    // 2. Batch adding mixed pregnancy ingredients
+    const addedBatch = await api(server, "/api/ingredients/batch", {
+      method: "POST",
+      body: { text: "山楂、西蓝花" },
+    });
+    assert.equal(addedBatch.response.status, 200);
+    const byName = new Map(addedBatch.payload.addedIngredients.map((i) => [i.name, i.pregnancyLevel]));
+    assert.equal(byName.get("山楂"), "caution");
+    assert.equal(byName.get("西蓝花"), "safe");
+
+    // 3. Family settings update
+    const updatedSettings = await api(server, "/api/settings", {
+      method: "PATCH",
+      body: { pregnancyMode: true, dietaryNotes: "孕中期、注意控糖" },
+    });
+    assert.equal(updatedSettings.response.status, 200);
+    assert.equal(updatedSettings.payload.settings.pregnancyMode, true);
+    assert.equal(updatedSettings.payload.settings.dietaryNotes, "孕中期、注意控糖");
+
+    // 4. Manual recipe creation (自己录入)
+    const manualRecipe = await api(server, "/api/recipes", {
+      method: "POST",
+      body: {
+        title: "私房蒜蓉西蓝花",
+        method: "炒",
+        minutes: 10,
+        ingredients: [
+          { name: "西蓝花", quantityLabel: "1颗", required: true },
+          { name: "大蒜", quantityLabel: "3瓣", required: false },
+        ],
+        steps: ["西蓝花焯水2分钟。", "热锅爆香蒜末翻炒均匀。"],
+      },
+    });
+    assert.equal(manualRecipe.response.status, 200);
+    assert.equal(manualRecipe.payload.recipe.title, "私房蒜蓉西蓝花");
+    assert.equal(manualRecipe.payload.recipe.pregnancyWarning.level, "safe");
+
+    // 5. Meal plan suggestions: use_existing (default 2 dishes + staple) & shopping_plan
+    const existingPlan = await api(server, "/api/meal-plan/suggest", {
+      method: "POST",
+      body: { mode: "use_existing", dishCount: 2, includeStaple: true },
+    });
+    assert.equal(existingPlan.response.status, 200);
+    assert.equal(existingPlan.payload.plan.meals.length >= 1, true);
+    assert.ok(existingPlan.payload.plan.staple);
+
+    const shopSuggestion = await api(server, "/api/meal-plan/suggest", {
+      method: "POST",
+      body: { mode: "shopping_plan", dishCount: 2, mealsCount: 1, shoppingMode: "fresh" },
+    });
+    assert.equal(shopSuggestion.response.status, 200);
+    assert.equal(shopSuggestion.payload.plan.meals.length >= 2, true);
+    assert.equal(shopSuggestion.payload.plan.shoppingItems.length > 0, true);
+
+    // 6. Save shopping plan, mark items checked, commit to inventory + save meals
+    const itemsToSave = shopSuggestion.payload.plan.shoppingItems.map((item, idx) => ({
+      ...item,
+      checked: idx === 0,
+    }));
+    const savedPlan = await api(server, "/api/shopping-plan", {
+      method: "PUT",
+      body: {
+        title: shopSuggestion.payload.plan.title,
+        summary: shopSuggestion.payload.plan.summary,
+        staple: shopSuggestion.payload.plan.staple,
+        meals: shopSuggestion.payload.plan.meals,
+        items: itemsToSave,
+      },
+    });
+    assert.equal(savedPlan.response.status, 200);
+    assert.equal(savedPlan.payload.shoppingPlan.items.length, itemsToSave.length);
+
+    const committed = await api(server, "/api/shopping-plan/commit", {
+      method: "POST",
+      body: { saveMeals: true },
+    });
+    assert.equal(committed.response.status, 200);
+    assert.equal(committed.payload.addedIngredients.length, 1);
+    assert.equal(committed.payload.ingredients.some((i) => i.name === itemsToSave[0].name), true);
+    assert.equal(committed.payload.savedRecipeIds.length > 0, true);
   } finally {
     await server.stop();
   }

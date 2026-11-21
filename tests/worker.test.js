@@ -225,6 +225,7 @@ function createDatabase() {
   database.exec("PRAGMA foreign_keys = ON");
   database.exec(fs.readFileSync(new URL("../migrations/0001_init.sql", import.meta.url), "utf8"));
   database.exec(fs.readFileSync(new URL("../migrations/0002_consumption_events.sql", import.meta.url), "utf8"));
+  database.exec(fs.readFileSync(new URL("../migrations/0003_pregnancy_and_shopping.sql", import.meta.url), "utf8"));
   database.exec(`
     INSERT INTO ingredients (name, category, state) VALUES ('番茄', '蔬菜', 'none'), ('鸡蛋', '肉禽蛋', 'none');
     INSERT INTO recipes (title, method, minutes, status) VALUES ('番茄炒蛋', '炒', 15, 'formal');

@@ -358,6 +358,7 @@ select:focus-visible,
 
 .floating-banner.toast {
   bottom: calc(92px + env(safe-area-inset-bottom));
+  z-index: 40;
   background: var(--ink);
   color: #fff;
 }
@@ -3382,6 +3383,1006 @@ select:focus-visible,
 .selection-pill.selected .mini-state {
   background: rgba(255, 255, 255, 0.22);
   color: #fff;
+}
+
+/* ============================================================
+   MEAL PLANNER, SHOPPING LIST & PREGNANCY GUARDIAN STYLES
+   ============================================================ */
+
+/* Hero Multi-Action & Empty Fridge Variant */
+.hero-card.is-empty-fridge {
+  background: linear-gradient(135deg, #275844 0%, #1d6f52 60%, #2a8763 100%);
+}
+
+.hero-empty-title {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.25;
+  margin: 6px 0 4px;
+  letter-spacing: -0.02em;
+}
+
+.hero-btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.hero-pick-btn.primary-hero {
+  background: #fff;
+  color: var(--primary);
+  font-weight: 700;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
+}
+
+.hero-card.is-empty-fridge .hero-pick-btn.primary-hero {
+  color: #195f44;
+}
+
+/* Pregnancy Badges, Info Boxes & Alert Banners */
+.preg-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.preg-pill.compact {
+  font-size: 10.5px;
+  padding: 1.5px 6px;
+}
+
+.preg-pill.preg-safe {
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
+.preg-pill.preg-caution {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.preg-pill.preg-avoid {
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.preg-pill.preg-unknown {
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.preg-info-box {
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.preg-info-box.preg-safe {
+  background: var(--green-soft);
+  color: var(--green-text);
+  box-shadow: inset 0 0 0 1px rgba(47, 163, 107, 0.25);
+}
+
+.preg-info-box.preg-caution {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.28);
+}
+
+.preg-info-box.preg-avoid {
+  background: var(--red-soft);
+  color: var(--red-text);
+  box-shadow: inset 0 0 0 1px rgba(229, 72, 58, 0.3);
+}
+
+.preg-info-box.preg-unknown {
+  background: var(--surface-soft);
+  color: var(--ink-secondary);
+}
+
+.preg-info-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.preg-info-note {
+  margin: 0;
+}
+
+.preg-disclaimer {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.preg-alert-slot {
+  padding: 0 16px;
+  margin-top: 10px;
+}
+
+.preg-alert-card {
+  border-radius: var(--radius-lg);
+  padding: 13px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--shadow-card);
+}
+
+.preg-alert-card.preg-avoid {
+  background: #fff3f2;
+  box-shadow: 0 0 0 1.5px rgba(229, 72, 58, 0.35), 0 8px 20px rgba(229, 72, 58, 0.08);
+}
+
+.preg-alert-card.preg-caution {
+  background: #fff9ec;
+  box-shadow: 0 0 0 1.5px rgba(217, 119, 6, 0.32), 0 8px 20px rgba(217, 119, 6, 0.08);
+}
+
+.preg-alert-card.preg-unknown {
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-card);
+}
+
+.preg-alert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.preg-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.preg-alert-card.preg-avoid .preg-alert-title {
+  color: var(--red-text);
+}
+
+.preg-alert-card.preg-caution .preg-alert-title {
+  color: var(--amber-text);
+}
+
+.preg-alert-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--ink-secondary);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.preg-alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.preg-alert-list li {
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.preg-alert-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.preg-alert-list li p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+}
+
+.preg-alert-safe-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--green-text);
+  font-weight: 600;
+}
+
+/* Batch Preview Pregnancy Summary */
+.parse-chip.preg-border-avoid {
+  box-shadow: 0 0 0 1.5px rgba(229, 72, 58, 0.45);
+  background: #fff7f6;
+}
+
+.parse-chip.preg-border-caution {
+  box-shadow: 0 0 0 1.5px rgba(217, 119, 6, 0.42);
+  background: #fffbf2;
+}
+
+.preview-preg-summary {
+  border-radius: 12px;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.preview-preg-summary.preg-safe {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--green-soft);
+  color: var(--green-text);
+  font-weight: 600;
+}
+
+.preview-preg-summary.preg-caution {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.preview-preg-summary.preg-avoid {
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.preview-preg-summary.preg-unknown {
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.preview-preg-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.preview-preg-summary ul {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Tile & Card Pregnancy Tags */
+.ing-tile.is-preg-avoid {
+  box-shadow: 0 0 0 1.5px rgba(229, 72, 58, 0.35), var(--shadow-card);
+  background: #fffafa;
+}
+
+.tile-preg-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 5px;
+  margin-top: 2px;
+}
+
+.tile-preg-tag.preg-avoid {
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.tile-preg-tag.preg-caution {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.tag-pill.tag-amber {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.cover-preg-dot {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+}
+
+.rc-add-shop-btn {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 4px 9px;
+  border-radius: 999px;
+  align-self: flex-start;
+}
+
+/* Detail Sheet Missing Banner + Pregnancy Box */
+.readiness-banner.with-action {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.readiness-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.btn-soft-xs {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary-border);
+}
+
+.detail-preg-box {
+  border-radius: 14px;
+  padding: 11px 13px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.detail-preg-box.preg-avoid {
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.detail-preg-box.preg-caution {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.detail-preg-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-preg-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.45;
+}
+
+/* Manual Recipe Entry Button in Create Sheet */
+.manual-recipe-entry-btn {
+  width: 100%;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.manual-recipe-entry-btn span {
+  flex: 1;
+  text-align: left;
+}
+
+/* Shared Shopping List Card */
+.shopping-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.shopping-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shopping-head-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.shopping-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: var(--primary-soft);
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  flex: none;
+}
+
+.shopping-head-title h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.shopping-head-title p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.shopping-head-btns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.btn-ghost-xs,
+.btn-danger-xs,
+.btn-primary-xs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--ink-secondary);
+}
+
+.btn-ghost-xs.danger {
+  color: var(--red-text);
+}
+
+.btn-danger-xs {
+  background: var(--red);
+  color: #fff;
+}
+
+.btn-primary-xs {
+  background: var(--primary);
+  color: #fff;
+}
+
+.shopping-meals-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.shopping-strip-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.shopping-meal-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shopping-meal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.shopping-meal-chip.active {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: none;
+}
+
+.shopping-meal-preview {
+  margin-top: 2px;
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shopping-meal-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.shopping-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shopping-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--bg);
+  transition: opacity 140ms;
+}
+
+.shopping-item-row.is-checked {
+  opacity: 0.62;
+}
+
+.shopping-item-row.is-checked strong {
+  text-decoration: line-through;
+}
+
+.shopping-item-check {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.shopping-item-check input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--primary);
+  flex: none;
+}
+
+.shopping-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.shopping-item-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 13.5px;
+}
+
+.shop-qty {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.shopping-item-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.shopping-item-warn {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.shopping-item-warn.preg-avoid {
+  color: var(--red-text);
+}
+
+.shopping-item-warn.preg-caution {
+  color: var(--amber-text);
+}
+
+.shopping-item-del {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--subtle);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.shopping-manual-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shopping-manual-row {
+  display: flex;
+  gap: 6px;
+}
+
+.shopping-manual-row input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 11px;
+  font-size: 13.5px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.shopping-manual-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  padding: 6px 9px;
+  border-radius: 9px;
+}
+
+.shopping-manual-warn.preg-avoid {
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.shopping-manual-warn.preg-caution {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+}
+
+.shopping-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.shopping-save-meals-opt,
+.done-save-recipe-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.shopping-save-meals-opt input,
+.done-save-recipe-opt input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--primary);
+}
+
+/* Meal Planner Sheet */
+.planner-tabs-wrap {
+  padding: 0 16px 8px;
+}
+
+.planner-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 24px;
+}
+
+.planner-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.planner-control-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.planner-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.planner-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.planner-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.planner-result-banner {
+  background: var(--bg);
+  border-radius: 14px;
+  padding: 12px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.planner-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.planner-result-banner p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+}
+
+.planner-staple-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 5px 10px;
+  border-radius: 10px;
+  align-self: flex-start;
+}
+
+.planner-meal-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.planner-dish-card {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 13px;
+  box-shadow: 0 0 0 1px var(--line), 0 4px 14px rgba(34, 24, 16, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.planner-dish-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rc-cover.sm {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  font-size: 24px;
+}
+
+.planner-dish-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.planner-dish-info h3 {
+  margin: 0;
+  font-size: 15.5px;
+}
+
+.planner-dish-reason {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+}
+
+.meal-preg-tip {
+  margin: 0;
+  font-size: 12px;
+  color: var(--green-text);
+  background: var(--green-soft);
+  padding: 5px 9px;
+  border-radius: 9px;
+  line-height: 1.4;
+}
+
+.planner-ing-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.planner-ing-pill {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink-secondary);
+}
+
+.planner-ing-pill.have {
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
+.planner-ing-pill.need {
+  background: var(--amber-soft);
+  color: var(--amber-text);
+  font-weight: 600;
+}
+
+.planner-steps-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: var(--bg);
+}
+
+.mini-step-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  line-height: 1.5;
+}
+
+.planner-dish-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.planner-dish-actions .btn-soft,
+.planner-dish-actions .btn-primary {
+  height: 38px;
+  font-size: 13px;
+}
+
+.planner-shop-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.planner-shop-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.planner-shop-row {
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 9px 11px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+}
+
+.planner-shop-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+}
+
+.planner-shop-main small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.planner-shop-sub {
+  width: 100%;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.planner-bottom-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Family Tab Pregnancy Settings Toggle */
+.toggle-switch {
+  width: 48px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--line);
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  flex: none;
+  transition: background 180ms;
+}
+
+.toggle-switch.on {
+  background: var(--green);
+}
+
+.toggle-knob {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  transition: transform 180ms var(--ease-out);
+}
+
+.toggle-switch.on .toggle-knob {
+  transform: translateX(20px);
+}
+
+.dietary-notes-block {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.dietary-quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 @media (prefers-reduced-motion: reduce) {
