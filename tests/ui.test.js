@@ -57,11 +57,21 @@ test("家庭成员 can use the redesigned mobile cooking flow", { skip: process.
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".ingredient-tools-sticky")).position), "sticky");
     await page.getByLabel("搜索食材").fill("");
 
-    // Live parse preview on Ingredients tab
-    await page.getByLabel("自然语言录入食材").fill("胡萝卜、牛肉");
+    // Typing on Ingredients tab should not auto-parse or unmount the textarea mid-input
+    const ingredientTextarea = page.getByLabel("自然语言录入食材");
+    await ingredientTextarea.click();
+    await ingredientTextarea.pressSequentially("j");
+    assert.equal(await ingredientTextarea.isVisible(), true);
+    assert.equal(await ingredientTextarea.inputValue(), "j");
+    assert.equal(await page.getByText("识别到 1 种，确认后加入").count(), 0);
+
+    // Explicit parse preview on Ingredients tab
+    await ingredientTextarea.fill("胡萝卜、牛肉");
+    await page.getByRole("button", { name: "识别食材" }).click();
     await page.getByText("识别到 2 种，确认后加入").waitFor();
     await page.getByRole("button", { name: "修改" }).click();
-    await page.getByRole("button", { name: "取消" }).click();
+    assert.equal(await page.getByLabel("自然语言录入食材").inputValue(), "胡萝卜、牛肉");
+    await page.getByRole("button", { name: "清空" }).click();
 
     // Add, edit, delete single ingredient
     await page.getByRole("button", { name: "添加食材" }).click();

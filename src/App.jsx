@@ -87,7 +87,10 @@ export default function App() {
   const [ingredientSearchOpen, setIngredientSearchOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
   const [excludedPreviewNames, setExcludedPreviewNames] = useState([]);
-  const [editingBatchText, setEditingBatchText] = useState(false);
+  const [batchPreviewOpen, setBatchPreviewOpen] = useState(false);
+  const [batchInputOrigin, setBatchInputOrigin] = useState("manual");
+  const batchComposingRef = useRef(false);
+  const ingredientTextareaRef = useRef(null);
 
   // Recipes library state
   const [recipeQuery, setRecipeQuery] = useState("");
@@ -118,7 +121,10 @@ export default function App() {
   const busy = Boolean(pendingAction);
   const draftSourceReady = draftSource === "image" ? Boolean(draftImageDataUrl) : Boolean(draftText.trim());
 
-  const batchPreviewAll = useMemo(() => previewBatchIngredients(batchText), [batchText]);
+  const batchPreviewAll = useMemo(
+    () => (batchPreviewOpen ? previewBatchIngredients(batchText) : []),
+    [batchPreviewOpen, batchText],
+  );
   const batchPreviewItems = useMemo(
     () => batchPreviewAll.filter((item) => !excludedPreviewNames.includes(item.name)),
     [batchPreviewAll, excludedPreviewNames],
@@ -149,12 +155,33 @@ export default function App() {
     }
   }, [app]);
 
-  const handleBatchTextChange = (nextText) => {
+  const handleBatchTextChange = (nextText, { openPreview = false, origin = "manual" } = {}) => {
     setBatchText(nextText);
+    setExcludedPreviewNames([]);
+    setBatchInputOrigin(origin);
     if (!nextText.trim()) {
-      setExcludedPreviewNames([]);
-      setEditingBatchText(false);
+      setBatchPreviewOpen(false);
+    } else {
+      setBatchPreviewOpen(openPreview);
     }
+  };
+
+  const openBatchPreview = () => {
+    if (!batchText.trim() || busy) return;
+    setExcludedPreviewNames([]);
+    setBatchPreviewOpen(true);
+  };
+
+  const resumeEditingBatchText = () => {
+    setBatchPreviewOpen(false);
+    requestAnimationFrame(() => {
+      const textarea = ingredientTextareaRef.current;
+      if (textarea) {
+        textarea.focus();
+        const len = textarea.value.length;
+        textarea.setSelectionRange(len, len);
+      }
+    });
   };
 
   if (!token) {
@@ -269,7 +296,8 @@ export default function App() {
       setApp(nextApp);
       setBatchText("");
       setExcludedPreviewNames([]);
-      setEditingBatchText(false);
+      setBatchPreviewOpen(false);
+      setBatchInputOrigin("manual");
       setCompletionNotice({ message: "食材清单已更新，菜谱已重新匹配", undoId: null });
       setSyncState("synced");
     } catch (err) {
@@ -693,8 +721,20 @@ export default function App() {
                     className="quick-composer-input"
                     value={batchText}
                     onChange={(event) => handleBatchTextChange(event.target.value)}
+                    onCompositionStart={() => {
+                      batchComposingRef.current = true;
+                    }}
+                    onCompositionEnd={() => {
+                      batchComposingRef.current = false;
+                    }}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" && batchText.trim() && !busy) {
+                      if (
+                        event.key === "Enter" &&
+                        !event.nativeEvent.isComposing &&
+                        !batchComposingRef.current &&
+                        batchText.trim() &&
+                        !busy
+                      ) {
                         event.preventDefault();
                         addBatchIngredients();
                       }
@@ -706,22 +746,26 @@ export default function App() {
                   <VoiceInputButton
                     token={token}
                     disabled={busy}
-                    onTranscript={(text) => handleBatchTextChange(appendTranscript(batchText, text))}
+                    onTranscript={(text) =>
+                      handleBatchTextChange(appendTranscript(batchText, text), { openPreview: true, origin: "voice" })
+                    }
                     onError={setError}
                   />
                 </div>
                 {batchText.trim() && (
                   <div className="quick-composer-confirm">
-                    <div className="quick-preview-pills">
-                      {batchPreviewItems.slice(0, 5).map((item) => (
-                        <span key={item.name} className="mini-preview-chip">
-                          {item.emoji} {item.name}
-                        </span>
-                      ))}
-                      {batchPreviewItems.length > 5 && (
-                        <span className="mini-preview-more">+{batchPreviewItems.length - 5}</span>
-                      )}
-                    </div>
+                    {batchPreviewOpen && batchPreviewItems.length > 0 && (
+                      <div className="quick-preview-pills">
+                        {batchPreviewItems.slice(0, 5).map((item) => (
+                          <span key={item.name} className="mini-preview-chip">
+                            {item.emoji} {item.name}
+                          </span>
+                        ))}
+                        {batchPreviewItems.length > 5 && (
+                          <span className="mini-preview-more">+{batchPreviewItems.length - 5}</span>
+                        )}
+                      </div>
+                    )}
                     <div className="quick-composer-actions">
                       <button
                         type="button"
@@ -869,55 +913,100 @@ export default function App() {
                 </label>
               )}
 
-              {/* Voice Composer + Live Parse Preview Card */}
+              {/* Voice Composer + Explicit Parse Preview Card */}
               <section
-                className={`ingredient-composer-box ${batchText.trim() ? "has-preview" : ""}`}
+                className={`ingredient-composer-box ${batchPreviewOpen && batchText.trim() ? "has-preview" : ""}`}
                 aria-label="自然语言批量添加食材"
               >
-                {(!batchText.trim() || editingBatchText) && (
-                  <div className="quick-composer-row">
-                    <textarea
-                      className="quick-composer-textarea"
-                      rows={editingBatchText ? 2 : 1}
-                      value={batchText}
-                      onChange={(event) => handleBatchTextChange(event.target.value)}
-                      placeholder="说出或输入新添食材…"
-                      aria-label="自然语言录入食材"
-                      disabled={busy}
-                      autoFocus={editingBatchText}
-                    />
-                    <VoiceInputButton
-                      token={token}
-                      disabled={busy}
-                      onTranscript={(text) => {
-                        setEditingBatchText(false);
-                        handleBatchTextChange(appendTranscript(batchText, text));
-                      }}
-                      onError={setError}
-                    />
-                  </div>
-                )}
+                {(!batchPreviewOpen || !batchText.trim()) && (
+                  <>
+                    <div className="quick-composer-row">
+                      <textarea
+                        ref={ingredientTextareaRef}
+                        className="quick-composer-textarea"
+                        rows={batchText.includes("\n") || batchText.length > 18 ? 2 : 1}
+                        value={batchText}
+                        onChange={(event) => handleBatchTextChange(event.target.value)}
+                        onCompositionStart={() => {
+                          batchComposingRef.current = true;
+                        }}
+                        onCompositionEnd={() => {
+                          batchComposingRef.current = false;
+                        }}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "Enter" &&
+                            !event.shiftKey &&
+                            !event.nativeEvent.isComposing &&
+                            !batchComposingRef.current &&
+                            batchText.trim() &&
+                            !busy
+                          ) {
+                            event.preventDefault();
+                            openBatchPreview();
+                          }
+                        }}
+                        placeholder="说出或输入新添食材…"
+                        aria-label="自然语言录入食材"
+                        disabled={busy}
+                      />
+                      <VoiceInputButton
+                        token={token}
+                        disabled={busy}
+                        onTranscript={(text) =>
+                          handleBatchTextChange(appendTranscript(batchText, text), { openPreview: true, origin: "voice" })
+                        }
+                        onError={setError}
+                      />
+                    </div>
 
-                {!batchText.trim() && (
-                  <div className="composer-hint-row">
-                    <button
-                      type="button"
-                      className="example-link-btn"
-                      onClick={() => handleBatchTextChange("牛肉、两根胡萝卜、土豆、小葱、番茄快过期")}
-                      disabled={busy}
-                    >
-                      ✨ 试试示例：牛肉、胡萝卜、土豆、番茄快过期
-                    </button>
-                  </div>
-                )}
-
-                {batchText.trim() && (
-                  <div className="parse-preview-body">
-                    {!editingBatchText && (
-                      <div className="parse-quote">
-                        <span>🎙 “{batchText.trim()}”</span>
+                    {batchText.trim() ? (
+                      <div className="parse-actions composer-typing-actions">
+                        <button
+                          type="button"
+                          className="btn-soft"
+                          onClick={() => handleBatchTextChange("")}
+                          disabled={busy}
+                        >
+                          清空
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={openBatchPreview}
+                          disabled={busy}
+                        >
+                          <Sparkles size={15} aria-hidden="true" />
+                          识别食材
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="composer-hint-row">
+                        <button
+                          type="button"
+                          className="example-link-btn"
+                          onClick={() =>
+                            handleBatchTextChange("牛肉、两根胡萝卜、土豆、小葱、番茄快过期", {
+                              openPreview: true,
+                              origin: "example",
+                            })
+                          }
+                          disabled={busy}
+                        >
+                          ✨ 试试示例：牛肉、胡萝卜、土豆、番茄快过期
+                        </button>
                       </div>
                     )}
+                  </>
+                )}
+
+                {batchPreviewOpen && batchText.trim() && (
+                  <div className="parse-preview-body">
+                    <div className="parse-quote">
+                      <span>
+                        {batchInputOrigin === "voice" ? "🎙" : "📝"} “{batchText.trim()}”
+                      </span>
+                    </div>
                     <div className="parse-ai-label">
                       <Sparkles size={14} aria-hidden="true" />
                       <span>
@@ -952,16 +1041,10 @@ export default function App() {
                       <button
                         type="button"
                         className="btn-soft"
-                        onClick={() => {
-                          if (editingBatchText) {
-                            handleBatchTextChange("");
-                          } else {
-                            setEditingBatchText(true);
-                          }
-                        }}
+                        onClick={resumeEditingBatchText}
                         disabled={busy}
                       >
-                        {editingBatchText ? "取消" : "修改"}
+                        修改
                       </button>
                       <button
                         type="button"
