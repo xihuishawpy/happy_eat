@@ -5,12 +5,14 @@ const STATE_STORE = "happy-eat-state";
 const STATE_KEY = "main";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_DEEPSEEK_TEXT_MODEL = "deepseek-chat";
+const DEFAULT_DEEPSEEK_VISION_MODEL = "deepseek-flash";
 const DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const DEFAULT_DASHSCOPE_TEXT_MODEL = "qwen-plus";
 const DEFAULT_DASHSCOPE_VISION_MODEL = "qwen3-vl-plus";
 const DEFAULT_DASHSCOPE_ASR_MODEL = "qwen3-asr-flash";
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+const MAX_DEEPSEEK_AUDIO_BYTES = 8 * 1024 * 1024;
 const MAX_WEB_BYTES = 1024 * 1024;
 const MAX_CONCURRENCY_RETRIES = 6;
 const PANTRY = ["盐", "白糖", "生抽", "老抽", "食用油", "香醋", "料酒"];
@@ -223,19 +225,37 @@ async function handleSession(request, context, store, familyAccessCode) {
 }
 
 async function handleAudioTranscription(request, getEnv) {
-  if (!String(getEnv("DASHSCOPE_API_KEY", "")).trim()) {
-    return json({ error: "语音识别尚未配置（需配置 DASHSCOPE_API_KEY）" }, 503);
+  const asr = resolveAsrConfig(getEnv);
+  if (!asr) {
+    return json({ error: "语音识别尚未配置（需配置 DEEPSEEK_API_KEY 或 DASHSCOPE_API_KEY）" }, 503);
   }
   const body = await readJson(request);
   const audioDataUrl = String(body?.audioDataUrl || "");
   const match = audioDataUrl.match(/^data:(audio\/[\w.+-]+);base64,([A-Za-z0-9+/=]+)$/);
-  if (!match || !/^audio\/(webm|ogg|mpeg|mp3|wav|x-wav|flac|aac|aiff)$/i.test(match[1])) {
+  if (!match) {
     return json({ error: "录音格式不受支持" }, 422);
   }
-  if (Buffer.byteLength(match[2], "base64") > MAX_AUDIO_BYTES) {
+  const mimeType = match[1].toLowerCase();
+  const base64Data = match[2];
+  const byteLength = Buffer.byteLength(base64Data, "base64");
+
+  if (asr.provider === "deepseek") {
+    if (!/^audio\/(wav|x-wav|ogg)$/i.test(mimeType)) {
+      return json({ error: "DeepSeek 语音识别仅支持 WAV 或 Ogg Opus 录音格式，请刷新页面后重试" }, 422);
+    }
+    if (byteLength > MAX_DEEPSEEK_AUDIO_BYTES) {
+      return json({ error: "录音不能超过 8MB" }, 413);
+    }
+    return json({ text: await transcribeAudioWithDeepSeek(mimeType, base64Data, asr) });
+  }
+
+  if (!/^audio\/(webm|ogg|mpeg|mp3|wav|x-wav|flac|aac|aiff)$/i.test(mimeType)) {
+    return json({ error: "录音格式不受支持" }, 422);
+  }
+  if (byteLength > MAX_AUDIO_BYTES) {
     return json({ error: "录音不能超过 10MB" }, 413);
   }
-  return json({ text: await transcribeAudio(audioDataUrl, getEnv) });
+  return json({ text: await transcribeAudioWithDashScope(audioDataUrl, asr) });
 }
 
 async function handleCreateIngredient(request, store, getEnv) {
@@ -527,12 +547,14 @@ function buildApp(state, getEnv) {
 
   const textLlm = resolveTextLlmConfig(getEnv);
   const visionLlm = resolveVisionLlmConfig(getEnv);
+  const asrConfig = resolveAsrConfig(getEnv);
   return {
     family: { name: state.familyName || "张家", accessMode: "家庭访问码" },
     ai: {
       configured: Boolean(textLlm),
       textModel: textLlm?.model || DEFAULT_DEEPSEEK_TEXT_MODEL,
       visionModel: visionLlm?.model || "",
+      asrConfigured: Boolean(asrConfig),
     },
     pantry: PANTRY,
     categories: groupIngredients(ingredients),
@@ -617,6 +639,15 @@ function resolveTextLlmConfig(getEnv) {
 }
 
 function resolveVisionLlmConfig(getEnv) {
+  const deepSeekKey = String(getEnv("DEEPSEEK_API_KEY", "")).trim();
+  if (deepSeekKey) {
+    return {
+      provider: "deepseek",
+      apiKey: deepSeekKey,
+      baseUrl: String(getEnv("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL)).trim() || DEFAULT_DEEPSEEK_BASE_URL,
+      model: String(getEnv("DEEPSEEK_VISION_MODEL", DEFAULT_DEEPSEEK_VISION_MODEL)).trim() || DEFAULT_DEEPSEEK_VISION_MODEL,
+    };
+  }
   const dashScopeKey = String(getEnv("DASHSCOPE_API_KEY", "")).trim();
   if (!dashScopeKey) return null;
   return {
@@ -624,6 +655,25 @@ function resolveVisionLlmConfig(getEnv) {
     apiKey: dashScopeKey,
     baseUrl: String(getEnv("DASHSCOPE_BASE_URL", DEFAULT_DASHSCOPE_BASE_URL)).trim() || DEFAULT_DASHSCOPE_BASE_URL,
     model: String(getEnv("DASHSCOPE_VISION_MODEL", DEFAULT_DASHSCOPE_VISION_MODEL)).trim() || DEFAULT_DASHSCOPE_VISION_MODEL,
+  };
+}
+
+function resolveAsrConfig(getEnv) {
+  const deepSeekKey = String(getEnv("DEEPSEEK_API_KEY", "")).trim();
+  if (deepSeekKey) {
+    return {
+      provider: "deepseek",
+      apiKey: deepSeekKey,
+      baseUrl: String(getEnv("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL)).trim() || DEFAULT_DEEPSEEK_BASE_URL,
+    };
+  }
+  const dashScopeKey = String(getEnv("DASHSCOPE_API_KEY", "")).trim();
+  if (!dashScopeKey) return null;
+  return {
+    provider: "dashscope",
+    apiKey: dashScopeKey,
+    baseUrl: String(getEnv("DASHSCOPE_BASE_URL", DEFAULT_DASHSCOPE_BASE_URL)).trim() || DEFAULT_DASHSCOPE_BASE_URL,
+    model: String(getEnv("DASHSCOPE_ASR_MODEL", DEFAULT_DASHSCOPE_ASR_MODEL)).trim() || DEFAULT_DASHSCOPE_ASR_MODEL,
   };
 }
 
@@ -670,10 +720,11 @@ async function buildRecipeDraft(sourceType, sourceText, imageDataUrl, getEnv, ge
   if (sourceType === "generated") {
     extracted = await generateRecipeWithLLM(sourceText, textLlm);
   } else if (imageDataUrl) {
+    if (!/^data:image\/(jpeg|jpg|png|gif|webp);base64,[A-Za-z0-9+/=]+$/i.test(imageDataUrl)) {
+      throw httpError(422, "仅支持 JPG、PNG、WebP 或 GIF 格式的菜谱图片");
+    }
     if (visionLlm) {
       extracted = await extractRecipeWithLLM(sourceText, imageDataUrl, visionLlm);
-    } else if (textLlm?.provider === "deepseek") {
-      throw httpError(503, "当前 DeepSeek 文本模型不支持图片识谱，请改用文本/网页导入或补充配置 DASHSCOPE_API_KEY");
     } else {
       extracted = extractRecipeLocally(sourceText);
     }
@@ -821,7 +872,7 @@ async function callLlmJson(llm, messages) {
     model: llm.model,
     messages,
     temperature: 0.1,
-    ...(llm.provider === "deepseek" ? { response_format: { type: "json_object" } } : {}),
+    ...(llm.provider === "deepseek" ? { response_format: { type: "json_object" }, max_tokens: 1500 } : {}),
   };
   const response = await fetch(`${llm.baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -844,16 +895,36 @@ async function callLlmJson(llm, messages) {
   }
 }
 
-async function transcribeAudio(audioDataUrl, getEnv) {
-  const baseUrl = getEnv("DASHSCOPE_BASE_URL", DEFAULT_DASHSCOPE_BASE_URL) || DEFAULT_DASHSCOPE_BASE_URL;
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+async function transcribeAudioWithDeepSeek(mimeType, base64Data, asr) {
+  const root = asr.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+  const bytes = Buffer.from(base64Data, "base64");
+  const extension = mimeType.includes("ogg") ? "ogg" : "wav";
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: mimeType }), `speech.${extension}`);
+
+  const response = await fetch(`${root}/v1/tools/asr`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${getEnv("DASHSCOPE_API_KEY")}`,
+      Authorization: `Bearer ${asr.apiKey}`,
+    },
+    body: form,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(502, formatLlmError(payload.error?.message || payload.message, "DeepSeek 语音识别调用失败", "DeepSeek"));
+  }
+  return String(payload?.text || "").trim();
+}
+
+async function transcribeAudioWithDashScope(audioDataUrl, asr) {
+  const response = await fetch(`${asr.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${asr.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: getEnv("DASHSCOPE_ASR_MODEL", DEFAULT_DASHSCOPE_ASR_MODEL) || DEFAULT_DASHSCOPE_ASR_MODEL,
+      model: asr.model,
       messages: [{
         role: "user",
         content: [{ type: "input_audio", input_audio: { data: audioDataUrl } }],

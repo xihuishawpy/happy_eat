@@ -374,8 +374,9 @@ export default function App() {
 
   async function selectDraftImage(file) {
     if (!file) return;
+    setError("");
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const dataUrl = await compressRecipeImage(file);
       setDraftImageDataUrl(dataUrl);
     } catch (err) {
       setError(err.message);
@@ -2854,7 +2855,13 @@ function FamilySpaceTab({ app, totalRecipes, allRecipes, syncState, busy, onRefr
             <strong>AI 菜谱助手</strong>
             <span>
               {app.ai.configured
-                ? `已启用（${app.ai.textModel || "已配置"}）· ${app.ai.visionModel ? "支持文字与拍照识别" : "支持文字与网页导入"}`
+                ? `已启用（${app.ai.textModel || "已配置"}${app.ai.visionModel ? ` · 视觉 ${app.ai.visionModel}` : ""}）· ${
+                    app.ai.visionModel && app.ai.asrConfigured
+                      ? "支持文字、拍照识谱与语音"
+                      : app.ai.visionModel
+                        ? "支持文字与拍照识谱"
+                        : "支持文字与网页导入"
+                  }`
                 : "未配置 AI 模型密钥"}
             </span>
           </div>
@@ -3655,7 +3662,9 @@ function appendTranscript(current, transcript) {
 }
 
 async function normalizeRecordedAudio(blob) {
-  if (/^audio\/(webm|ogg|mpeg|mp3|wav|x-wav|flac|aac|aiff)/i.test(blob.type)) {
+  // DeepSeek ASR accepts 16-bit PCM WAV or Ogg Opus; pass through small Ogg/WAV directly
+  // and transcode WebM/MP4/large recordings into compact 16kHz 16-bit mono PCM WAV.
+  if (/^audio\/(ogg|wav|x-wav)/i.test(blob.type) && blob.size <= 4 * 1024 * 1024) {
     return new Blob([blob], { type: blob.type.split(";")[0] });
   }
 
@@ -3664,14 +3673,31 @@ async function normalizeRecordedAudio(blob) {
   const context = new AudioContextClass();
   try {
     const buffer = await context.decodeAudioData(await blob.arrayBuffer());
-    return encodeWav(buffer);
+    return encodeWav(buffer, 16000);
   } finally {
     await context.close();
   }
 }
 
-function encodeWav(audioBuffer) {
-  const samples = audioBuffer.getChannelData(0);
+function encodeWav(audioBuffer, targetSampleRate = 16000) {
+  const inputSamples = audioBuffer.getChannelData(0);
+  const inputRate = audioBuffer.sampleRate;
+  const outputRate = inputRate > targetSampleRate ? targetSampleRate : inputRate;
+  let samples = inputSamples;
+
+  if (outputRate !== inputRate) {
+    const ratio = inputRate / outputRate;
+    const length = Math.max(1, Math.round(inputSamples.length / ratio));
+    samples = new Float32Array(length);
+    for (let i = 0; i < length; i += 1) {
+      const pos = i * ratio;
+      const idx = Math.floor(pos);
+      const frac = pos - idx;
+      const next = Math.min(idx + 1, inputSamples.length - 1);
+      samples[i] = inputSamples[idx] * (1 - frac) + inputSamples[next] * frac;
+    }
+  }
+
   const data = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(data);
   const writeText = (offset, text) =>
@@ -3682,17 +3708,50 @@ function encodeWav(audioBuffer) {
   view.setUint32(16, 16, true);
   view.setUint16(20, 1, true);
   view.setUint16(22, 1, true);
-  view.setUint32(24, audioBuffer.sampleRate, true);
-  view.setUint32(28, audioBuffer.sampleRate * 2, true);
+  view.setUint32(24, outputRate, true);
+  view.setUint32(28, outputRate * 2, true);
   view.setUint16(32, 2, true);
   view.setUint16(34, 16, true);
   writeText(36, "data");
   view.setUint32(40, samples.length * 2, true);
-  samples.forEach((sample, index) => {
-    const value = Math.max(-1, Math.min(1, sample));
-    view.setInt16(44 + index * 2, value < 0 ? value * 0x8000 : value * 0x7fff, true);
-  });
+  for (let i = 0; i < samples.length; i += 1) {
+    const value = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, value < 0 ? value * 0x8000 : value * 0x7fff, true);
+  }
   return new Blob([data], { type: "audio/wav" });
+}
+
+async function compressRecipeImage(file, maxSide = 1600, quality = 0.82) {
+  const fallback = () => readFileAsDataUrl(file);
+  if (typeof document === "undefined" || typeof window.Image === "undefined") return fallback();
+
+  const rawDataUrl = await fallback();
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.onload = () => {
+      try {
+        const largest = Math.max(img.width, img.height);
+        const scale = largest > maxSide ? maxSide / largest : 1;
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(rawDataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL("image/jpeg", quality);
+        resolve(compressed.length < rawDataUrl.length ? compressed : rawDataUrl);
+      } catch {
+        resolve(rawDataUrl);
+      }
+    };
+    img.onerror = () => resolve(rawDataUrl);
+    img.src = rawDataUrl;
+  });
 }
 
 async function api(url, options = {}) {

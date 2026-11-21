@@ -7,10 +7,11 @@ Production runs as a Vite SPA with a Netlify Functions v2 API (`/api/*`) backed 
 Configure these in Netlify Site Settings -> Environment variables (or via `netlify env:set`):
 
 - `FAMILY_ACCESS_CODE` (required): shared family access code protecting `/api/*`
-- `DEEPSEEK_API_KEY` (optional, recommended for text AI): enables AI ingredient parsing, AI text/web recipe extraction, and AI recipe generation via DeepSeek (`deepseek-chat`)
+- `DEEPSEEK_API_KEY` (optional, recommended): enables text AI (`deepseek-chat`), multimodal image recipe recognition (`deepseek-flash`), and voice transcription (`/v1/tools/asr`) all with a single DeepSeek key
 - `DEEPSEEK_BASE_URL` (optional): defaults to `https://api.deepseek.com`
 - `DEEPSEEK_TEXT_MODEL` (optional): defaults to `deepseek-chat`
-- `DASHSCOPE_API_KEY` (optional): enables image recipe OCR/vision extraction and voice transcription (`/api/audio/transcriptions`), and also serves as fallback text LLM when `DEEPSEEK_API_KEY` is unset
+- `DEEPSEEK_VISION_MODEL` (optional): defaults to `deepseek-flash`
+- `DASHSCOPE_API_KEY` (optional): fallback provider for text, image vision, and voice transcription when `DEEPSEEK_API_KEY` is unset
 - `DASHSCOPE_BASE_URL` (optional): defaults to `https://dashscope.aliyuncs.com/compatible-mode/v1`
 - `DASHSCOPE_TEXT_MODEL` (optional): defaults to `qwen-plus`
 - `DASHSCOPE_VISION_MODEL` (optional): defaults to `qwen3-vl-plus`

@@ -222,7 +222,7 @@ test("Netlify Function supports cooking completion, undo, AI generation, and ASR
   }
 });
 
-test("Netlify Function supports DeepSeek text LLM and reports vision/ASR limits clearly", async () => {
+test("Netlify Function supports DeepSeek text, multimodal vision (deepseek-flash), and ASR (/v1/tools/asr)", async () => {
   const store = new MemoryBlobStore();
   const handler = createApiHandler({
     store,
@@ -236,20 +236,56 @@ test("Netlify Function supports DeepSeek text LLM and reports vision/ASR limits 
   assert.equal(app.status, 200);
   assert.equal(app.payload.ai.configured, true);
   assert.equal(app.payload.ai.textModel, "deepseek-chat");
+  assert.equal(app.payload.ai.visionModel, "deepseek-flash");
+  assert.equal(app.payload.ai.asrConfigured, true);
 
-  const imageUnsupported = await callApi(handler, "/api/drafts/analyze", {
+  // Reject unsupported audio container for DeepSeek ASR
+  const badAudio = await callApi(handler, "/api/audio/transcriptions", {
     method: "POST",
-    body: { sourceType: "image", imageDataUrl: "data:image/png;base64,iVBORw0KGgo=" },
+    body: { audioDataUrl: "data:audio/webm;base64,GkXfoA==" },
   });
-  assert.equal(imageUnsupported.status, 503);
+  assert.equal(badAudio.status, 422);
 
   const originalFetch = globalThis.fetch;
-  let capturedUrl = "";
-  let capturedBody = null;
+  const calls = [];
   try {
     globalThis.fetch = async (url, init) => {
-      capturedUrl = String(url);
-      capturedBody = JSON.parse(init.body);
+      const urlStr = String(url);
+      calls.push({ url: urlStr, init });
+
+      if (urlStr.endsWith("/v1/tools/asr")) {
+        assert.equal(init.headers.Authorization, "Bearer ds-test-key");
+        assert.equal(init.body instanceof FormData, true);
+        const uploaded = init.body.get("file");
+        assert.equal(uploaded instanceof Blob, true);
+        return Response.json({ request_id: "req-1", text: "番茄炒蛋，两个番茄三个鸡蛋，热锅翻炒", duration_ms: 2100 });
+      }
+
+      const payload = JSON.parse(init.body);
+      if (payload.model === "deepseek-flash") {
+        const userParts = payload.messages[1].content;
+        assert.equal(Array.isArray(userParts), true);
+        assert.equal(userParts[1].type, "image_url");
+        return Response.json({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                title: "拍照识别番茄炒蛋",
+                method: "炒",
+                minutes: 12,
+                preferenceWarning: "",
+                requiredIngredients: [
+                  { name: "番茄", quantityLabel: "2个" },
+                  { name: "鸡蛋", quantityLabel: "3个" },
+                ],
+                optionalIngredients: [{ name: "葱花", quantityLabel: "少许" }],
+                steps: ["番茄切块，鸡蛋打散。", "先炒蛋再炒番茄拌匀。"],
+              }),
+            },
+          }],
+        });
+      }
+
       return Response.json({
         choices: [{
           message: {
@@ -270,6 +306,26 @@ test("Netlify Function supports DeepSeek text LLM and reports vision/ASR limits 
       });
     };
 
+    // 1. DeepSeek ASR transcription (WAV)
+    const transcript = await callApi(handler, "/api/audio/transcriptions", {
+      method: "POST",
+      body: { audioDataUrl: "data:audio/wav;base64,UklGRg==" },
+    });
+    assert.equal(transcript.status, 200);
+    assert.equal(transcript.payload.text, "番茄炒蛋，两个番茄三个鸡蛋，热锅翻炒");
+    assert.equal(calls.at(-1).url, "https://api.deepseek.com/v1/tools/asr");
+
+    // 2. DeepSeek Vision recipe OCR (deepseek-flash)
+    const visionDraft = await callApi(handler, "/api/drafts/analyze", {
+      method: "POST",
+      body: { sourceType: "image", imageDataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" },
+    });
+    assert.equal(visionDraft.status, 200);
+    assert.equal(visionDraft.payload.draft.title, "拍照识别番茄炒蛋");
+    assert.equal(calls.at(-1).url, "https://api.deepseek.com/chat/completions");
+    assert.equal(JSON.parse(calls.at(-1).init.body).model, "deepseek-flash");
+
+    // 3. DeepSeek Text recipe generation (deepseek-chat)
     const tomato = app.payload.ingredients.find((item) => item.name === "番茄");
     const egg = app.payload.ingredients.find((item) => item.name === "鸡蛋");
     const generated = await callApi(handler, "/api/recipes/generate", {
@@ -277,9 +333,10 @@ test("Netlify Function supports DeepSeek text LLM and reports vision/ASR limits 
       body: { ingredientIds: [tomato.id, egg.id] },
     });
     assert.equal(generated.status, 200);
-    assert.equal(capturedUrl, "https://api.deepseek.com/chat/completions");
-    assert.equal(capturedBody.model, "deepseek-chat");
-    assert.deepEqual(capturedBody.response_format, { type: "json_object" });
+    assert.equal(calls.at(-1).url, "https://api.deepseek.com/chat/completions");
+    const genBody = JSON.parse(calls.at(-1).init.body);
+    assert.equal(genBody.model, "deepseek-chat");
+    assert.deepEqual(genBody.response_format, { type: "json_object" });
     assert.equal(generated.payload.draft.title, "DeepSeek番茄蛋");
   } finally {
     globalThis.fetch = originalFetch;
