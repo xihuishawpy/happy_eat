@@ -45,6 +45,7 @@ export function buildMealPlanMessages({
   maxMinutes = 0,
   excludeTitles = [],
   shoppingMode = "top_up",
+  focusIngredients = [],
 }) {
   const count = Math.max(1, Math.min(4, Number(dishCount) || 2));
   const totalDishes = mode === "shopping_plan" ? Math.min(6, count * Math.max(1, Math.min(3, Number(mealsCount) || 1))) : count;
@@ -59,6 +60,13 @@ export function buildMealPlanMessages({
         .map((item) => `${item.name}${stateLabels[item.state] ? `(${stateLabels[item.state]})` : ""}`)
         .join("、")
     : "目前家中基本没有可用新鲜食材";
+
+  const focusList = (Array.isArray(focusIngredients) ? focusIngredients : [])
+    .map((n) => String(n || "").trim())
+    .filter(Boolean);
+  const focusLine = focusList.length > 0
+    ? `家庭特别指定本次想用掉的食材：${focusList.join("、")}（请尽量围绕这些食材出菜）。`
+    : "";
 
   const excludeText = excludeTitles.length > 0 ? `请避免重复推荐以下菜名：${excludeTitles.slice(0, 10).join("、")}。` : "";
   const existingTitles = formalRecipes.slice(0, 12).map((r) => r.title).join("、");
@@ -80,6 +88,7 @@ export function buildMealPlanMessages({
     const prompt = [
       `请根据家庭现有食材，规划一顿家常饭：共 ${count} 道菜${includeStaple ? " + 1 份主食建议" : ""}（一般为荤素搭配，省心好做）。`,
       `现有可用食材：${ingText}`,
+      focusLine,
       `常备调味品：${[...PANTRY_SET].join("、")}。`,
       "优先消耗标注为「快过期」或「优先用掉」的食材。",
       "每道菜的 requiredIngredients 必须只使用上面列出的现有食材（不要凭空编造家里没有的主料），常备调料放 optionalIngredients。",
@@ -181,6 +190,7 @@ export function sanitizeLlmMealPlan(raw, params) {
     mealsCount = 1,
     excludeTitles = [],
     shoppingMode = "top_up",
+    focusIngredients = [],
   } = params;
 
   const availableSet = new Set(ingredients.map((item) => item.name));
@@ -211,6 +221,7 @@ export function sanitizeLlmMealPlan(raw, params) {
       mealsCount,
       excludeTitles,
       shoppingMode,
+      focusIngredients,
     });
   }
 

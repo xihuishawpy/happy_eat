@@ -34,16 +34,21 @@ test("家庭成员 can use the redesigned mobile cooking flow", { skip: process.
     await page.getByRole("button", { name: "进入" }).click();
     await page.locator(".hero-card").waitFor();
 
-    // Today layout & Random Pick
-    await page.getByRole("button", { name: "帮我挑一道" }).click();
+    // Today layout: streamlined 2-button Hero + inline Random Pick beside match tabs
+    assert.equal(await page.locator(".hero-card .hero-pick-btn").count(), 2);
+    assert.equal(await page.getByLabel("家里新添了什么").count(), 0);
+    await page.getByRole("button", { name: "从自家菜谱随便挑一道" }).click();
     const pickDialog = page.getByRole("dialog");
-    await pickDialog.getByText("今天不如就做这道").waitFor();
+    await pickDialog.getByText("自家菜谱随便挑一道").waitFor();
     await pickDialog.getByRole("button", { name: "关闭推荐" }).click();
 
-    // Quick composer on Today at 320px narrow screen
+    // Narrow 320px viewport: batch ingredient entry unified on Ingredients tab
     await page.setViewportSize({ width: 320, height: 700 });
-    await page.getByLabel("家里新添了什么").fill("冬瓜、豆腐、豆瓣酱、花生、黄瓜、干辣椒");
-    await page.getByRole("button", { name: "解析并添加" }).click();
+    await page.getByRole("button", { name: "食材", exact: true }).click();
+    await page.getByLabel("自然语言录入食材").fill("冬瓜、豆腐、豆瓣酱、花生、黄瓜、干辣椒");
+    await page.getByRole("button", { name: "识别食材" }).click();
+    await page.getByRole("button", { name: "全部加入" }).click();
+    await page.getByRole("button", { name: "今天", exact: true }).click();
     await page.getByText("宫保鸡丁").waitFor();
     await page.getByText("麻婆豆腐").waitFor();
 
@@ -203,9 +208,12 @@ test("家庭成员 can use the redesigned mobile cooking flow", { skip: process.
     await updatedDetail.waitFor({ state: "detached" });
     assert.equal(await page.getByText("测试正式菜谱").count(), 0);
 
-    // Family tab
+    // Family tab: unified dietary profile, collapsible pantry, no redundant read-only preference card
     await page.getByRole("button", { name: "家庭", exact: true }).click();
-    await page.getByText("常备调味品").waitFor();
+    await page.getByText("家庭饮食档案").waitFor();
+    assert.equal(await page.getByText("忌口与饮食提醒").count(), 0);
+    await page.getByRole("button", { name: /常备调味品/ }).click();
+    await page.getByText("以下调味品在匹配菜谱和规划买菜时默认视为已有").waitFor();
 
     // Check zero horizontal overflow across tabs at 320px
     for (const tabName of ["今天", "食材", "菜谱", "家庭"]) {
@@ -220,25 +228,35 @@ test("家庭成员 can use the redesigned mobile cooking flow", { skip: process.
   }
 });
 
-test("家庭成员 can select ingredients for AI recipe generation via Create sheet", { skip: process.env.RUN_PLAYWRIGHT_UI !== "1" }, async () => {
+test("家庭成员 can select focus ingredients inside unified Meal Planner", { skip: process.env.RUN_PLAYWRIGHT_UI !== "1" }, async () => {
+  let receivedPrompt = "";
   const llm = createServer((request, response) => {
-    request.resume();
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
     request.on("end", () => {
+      receivedPrompt = Buffer.concat(chunks).toString("utf8");
       response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify({
         choices: [{
           message: {
             content: JSON.stringify({
-              title: "自选番茄炒蛋",
-              method: "炒",
-              minutes: 15,
-              preferenceWarning: "",
-              requiredIngredients: [
-                { name: "番茄", quantityLabel: "2个" },
-                { name: "鸡蛋", quantityLabel: "2个" },
-              ],
-              optionalIngredients: [{ name: "生抽", quantityLabel: "1勺" }],
-              steps: ["番茄切块，鸡蛋打散。", "鸡蛋炒熟后加入番茄翻炒2分钟。"],
+              title: "自选番茄鸡蛋一顿饭",
+              summary: "围绕指定的番茄和鸡蛋快速出菜",
+              staple: "蒸米饭",
+              meals: [{
+                title: "自选番茄炒蛋",
+                method: "炒",
+                minutes: 15,
+                reason: "精准消耗指定的番茄与鸡蛋",
+                pregnancyTip: "鸡蛋彻底炒熟",
+                preferenceWarning: "",
+                requiredIngredients: [
+                  { name: "番茄", quantityLabel: "2个" },
+                  { name: "鸡蛋", quantityLabel: "2个" },
+                ],
+                optionalIngredients: [{ name: "生抽", quantityLabel: "1勺" }],
+                steps: ["番茄切块，鸡蛋打散。", "鸡蛋炒熟后加入番茄翻炒2分钟。"],
+              }],
             }),
           },
         }],
@@ -262,17 +280,16 @@ test("家庭成员 can select ingredients for AI recipe generation via Create sh
     await page.getByLabel("家庭访问码").fill(server.accessCode);
     await page.getByRole("button", { name: "进入" }).click();
 
-    await page.getByRole("button", { name: "添加菜谱" }).click();
-    await page.getByRole("button", { name: "选食材并生成" }).click();
-    const selector = page.getByRole("dialog", { name: "选择想用的食材" });
-    await selector.getByRole("button", { name: "选择番茄" }).click();
-    await selector.getByRole("button", { name: "选择鸡蛋" }).click();
-    assert.equal(await selector.getByRole("button", { name: "选择番茄" }).getAttribute("aria-pressed"), "true");
-    await selector.getByRole("button", { name: "用已选 2 种食材生成" }).click();
+    await page.getByRole("button", { name: "帮我想吃什么" }).click();
+    const planner = page.getByRole("dialog", { name: "今日点菜与买菜规划" });
+    await planner.getByRole("button", { name: /指定想用的食材/ }).click();
+    await planner.getByRole("button", { name: "指定食材番茄" }).click();
+    await planner.getByRole("button", { name: "指定食材鸡蛋" }).click();
+    assert.equal(await planner.getByRole("button", { name: "指定食材番茄" }).getAttribute("aria-pressed"), "true");
+    await planner.getByRole("button", { name: "用已选 2 种食材搭配" }).click();
 
-    const editor = page.getByRole("dialog", { name: "编辑菜谱草稿" });
-    await editor.waitFor();
-    assert.equal(await editor.getByLabel("菜谱标题").inputValue(), "自选番茄炒蛋");
+    await planner.getByText("自选番茄炒蛋").waitFor();
+    assert.equal(receivedPrompt.includes("番茄、鸡蛋") || receivedPrompt.includes("鸡蛋、番茄"), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
   } finally {
     await browser?.close();
@@ -339,9 +356,11 @@ test("家庭成员 can use meal planner, shopping list, manual recipe, and pregn
     await page.getByRole("button", { name: "修改" }).click();
     await page.getByRole("button", { name: "清空" }).click();
 
-    // 5. Manual recipe creation via "+" sheet
+    // 5. Streamlined "+" sheet (4 distinct tiles, no duplicate AI card) -> Manual recipe creation
     await page.getByRole("button", { name: "添加菜谱" }).click();
-    await page.getByRole("button", { name: "手动写一道自家拿手菜" }).click();
+    assert.equal(await page.locator(".import-source-tile").count(), 4);
+    assert.equal(await page.getByText("AI 帮我配菜").count(), 0);
+    await page.getByRole("button", { name: /手动写菜谱/ }).click();
     const manualDialog = page.getByRole("dialog", { name: "手动写菜谱" });
     await manualDialog.getByLabel("菜谱标题").fill("自家清炒生菜");
     await manualDialog.getByLabel("食材名称 1").fill("生菜");
@@ -353,12 +372,16 @@ test("家庭成员 can use meal planner, shopping list, manual recipe, and pregn
     await page.getByRole("dialog", { name: "自家清炒生菜" }).waitFor();
     await page.getByRole("button", { name: "关闭菜谱详情" }).click();
 
-    // 6. Family pregnancy settings & 320px zero overflow
+    // 6. Unified Family Dietary Profile -> dynamic local dietary alert + 320px zero overflow
     await page.setViewportSize({ width: 320, height: 700 });
     await page.getByRole("button", { name: "家庭", exact: true }).click();
-    await page.getByText("孕期饮食守护").waitFor();
+    await page.getByText("家庭饮食档案").waitFor();
     await page.getByRole("button", { name: "孕中期" }).click();
+    await page.getByRole("button", { name: "不吃葱蒜" }).click();
     await page.getByRole("button", { name: "保存家庭饮食备注" }).click();
+
+    await page.getByRole("button", { name: "今天", exact: true }).click();
+    await page.getByText("含葱").first().waitFor();
 
     for (const tabName of ["今天", "食材", "菜谱", "家庭"]) {
       await page.getByRole("button", { name: tabName, exact: true }).click();

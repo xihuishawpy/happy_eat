@@ -467,14 +467,23 @@ test("孕期提醒、饮食设置、手动写菜谱与买菜规划闭环 work en
     assert.equal(manualRecipe.payload.recipe.title, "私房蒜蓉西蓝花");
     assert.equal(manualRecipe.payload.recipe.pregnancyWarning.level, "safe");
 
-    // 5. Meal plan suggestions: use_existing (default 2 dishes + staple) & shopping_plan
+    // 5. Meal plan suggestions: use_existing (default 2 dishes + staple + optional selectedIngredientIds) & shopping_plan
+    const tomatoIng = updatedSettings.payload.ingredients.find((i) => i.name === "番茄");
     const existingPlan = await api(server, "/api/meal-plan/suggest", {
       method: "POST",
-      body: { mode: "use_existing", dishCount: 2, includeStaple: true },
+      body: {
+        mode: "use_existing",
+        dishCount: 2,
+        includeStaple: true,
+        selectedIngredientIds: tomatoIng ? [tomatoIng.id] : [],
+      },
     });
     assert.equal(existingPlan.response.status, 200);
     assert.equal(existingPlan.payload.plan.meals.length >= 1, true);
     assert.ok(existingPlan.payload.plan.staple);
+    if (tomatoIng) {
+      assert.equal(existingPlan.payload.plan.meals[0].ingredients.some((i) => i.name === "番茄"), true);
+    }
 
     const shopSuggestion = await api(server, "/api/meal-plan/suggest", {
       method: "POST",

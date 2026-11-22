@@ -4385,6 +4385,200 @@ select:focus-visible,
   gap: 6px;
 }
 
+/* Streamlined Header Status Pill (Pregnancy Guard + Sync Dot) */
+.header-status-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+  box-shadow: var(--shadow-card);
+  white-space: nowrap;
+  flex: none;
+}
+
+.header-status-pill.is-guard {
+  background: var(--green-soft);
+  color: var(--green-text);
+  box-shadow: inset 0 0 0 1px rgba(47, 163, 107, 0.28);
+}
+
+.header-status-pill .sync-dot {
+  position: static;
+  width: 7px;
+  height: 7px;
+  border: none;
+  margin-left: 1px;
+}
+
+.header-status-pill.sync-synced .sync-dot {
+  background: var(--green);
+}
+
+.header-status-pill.sync-syncing .sync-dot {
+  background: var(--amber);
+}
+
+.header-status-pill.sync-error .sync-dot {
+  background: var(--red);
+}
+
+/* Segmented Bar + Inline Random Dice Button */
+.matches-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.random-dice-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 42px;
+  padding: 0 11px;
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--ink-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+  box-shadow: var(--shadow-card);
+  white-space: nowrap;
+  flex: none;
+}
+
+.random-dice-btn:active {
+  transform: scale(0.96);
+}
+
+/* Create Sheet Primary Tile */
+.import-source-tile.primary-tile {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px rgba(232, 87, 47, 0.25);
+  color: var(--primary-dark);
+}
+
+/* Optional Focus Ingredient Picker inside MealPlannerSheet */
+.planner-focus-box {
+  background: var(--bg);
+  border-radius: 14px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.planner-focus-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  color: var(--ink-secondary);
+}
+
+.planner-focus-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.planner-focus-toggle-text small {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.planner-focus-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.planner-focus-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 150px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.planner-focus-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.planner-focus-pill.selected {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: none;
+}
+
+.planner-focus-pill.selected .mini-state {
+  background: rgba(255, 255, 255, 0.24);
+  color: #fff;
+}
+
+/* Collapsible Pantry Row on Family Tab */
+.pantry-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  color: var(--ink-secondary);
+}
+
+.pantry-collapse-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pantry-collapse-title h3 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.pantry-collapse-title span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pantry-collapse-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

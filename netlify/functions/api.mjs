@@ -470,6 +470,14 @@ async function handleSuggestMealPlan(request, store, getEnv) {
 
   const currentState = await readState(store);
   const app = buildApp(currentState, getEnv);
+  const selectedIds = Array.isArray(body?.selectedIngredientIds)
+    ? new Set(body.selectedIngredientIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))
+    : new Set();
+  const focusIngredients = [
+    ...(Array.isArray(body?.focusIngredients) ? body.focusIngredients.map((n) => String(n || "").trim()) : []),
+    ...app.ingredients.filter((item) => selectedIds.has(Number(item.id))).map((item) => item.name),
+  ].filter((name, idx, arr) => name && arr.indexOf(name) === idx).slice(0, 12);
+
   const formalRecipes = [...app.matches.ready, ...app.matches.missing];
   const params = {
     mode,
@@ -483,6 +491,7 @@ async function handleSuggestMealPlan(request, store, getEnv) {
     maxMinutes,
     excludeTitles,
     shoppingMode,
+    focusIngredients,
   };
 
   const textLlm = resolveTextLlmConfig(getEnv);

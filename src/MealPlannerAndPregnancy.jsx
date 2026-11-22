@@ -405,6 +405,8 @@ export function MealPlannerSheet({
   const [maxMinutes, setMaxMinutes] = useState(0);
   const [shoppingMode, setShoppingMode] = useState(nonPantryCount <= 3 ? "fresh" : "top_up");
   const [mealsCount, setMealsCount] = useState(1);
+  const [selectedIngredientIds, setSelectedIngredientIds] = useState([]);
+  const [pickerExpanded, setPickerExpanded] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState(null);
@@ -412,6 +414,29 @@ export function MealPlannerSheet({
   const [seenTitles, setSeenTitles] = useState([]);
   const [savedTitles, setSavedTitles] = useState([]);
   const [expandedSteps, setExpandedSteps] = useState({});
+
+  const focusCandidates = useMemo(() => {
+    const stateWeight = { expiring: 0, priority: 1, frozen: 2, none: 3 };
+    const nonSeasoning = app.ingredients.filter((item) => item.category !== "调味");
+    const list = nonSeasoning.length > 0 ? nonSeasoning : app.ingredients;
+    return [...list].sort((a, b) => {
+      if (settings.pregnancyMode) {
+        const aAvoid = a.pregnancyLevel === "avoid" ? 1 : 0;
+        const bAvoid = b.pregnancyLevel === "avoid" ? 1 : 0;
+        if (aAvoid !== bAvoid) return aAvoid - bAvoid;
+      }
+      return (stateWeight[a.state] ?? 3) - (stateWeight[b.state] ?? 3);
+    });
+  }, [app.ingredients, settings.pregnancyMode]);
+
+  const selectedFocusNames = useMemo(
+    () => app.ingredients.filter((item) => selectedIngredientIds.includes(item.id)).map((item) => item.name),
+    [app.ingredients, selectedIngredientIds],
+  );
+
+  function toggleFocusIngredient(id) {
+    setSelectedIngredientIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  }
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -443,6 +468,7 @@ export function MealPlannerSheet({
         maxMinutes: overrideMode === "use_existing" ? maxMinutes : 0,
         excludeTitles: nextExclude.slice(-12),
         shoppingMode,
+        selectedIngredientIds: overrideMode === "use_existing" ? selectedIngredientIds : [],
       });
       setPlan(result);
       setSeenTitles(nextExclude);
@@ -618,6 +644,68 @@ export function MealPlannerSheet({
                 </div>
               </div>
 
+              {focusCandidates.length > 0 && (
+                <div className="planner-focus-box">
+                  <button
+                    type="button"
+                    className="planner-focus-toggle"
+                    aria-expanded={pickerExpanded}
+                    onClick={() => setPickerExpanded((prev) => !prev)}
+                    disabled={loading}
+                  >
+                    <div className="planner-focus-toggle-text">
+                      <span className="planner-label">指定想用的食材（可选）</span>
+                      <small>
+                        {selectedFocusNames.length > 0
+                          ? `已指定 ${selectedFocusNames.length} 样：${selectedFocusNames.slice(0, 3).join("、")}${selectedFocusNames.length > 3 ? "…" : ""}`
+                          : "不选则自动优先消耗快过期食材"}
+                      </small>
+                    </div>
+                    {pickerExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
+
+                  {pickerExpanded && (
+                    <div className="planner-focus-panel">
+                      <div className="planner-focus-grid">
+                        {focusCandidates.map((item) => {
+                          const selected = selectedIngredientIds.includes(item.id);
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className={`planner-focus-pill ${selected ? "selected" : ""}`}
+                              aria-label={`指定食材${item.name}`}
+                              aria-pressed={selected}
+                              onClick={() => toggleFocusIngredient(item.id)}
+                              disabled={loading}
+                            >
+                              {selected ? (
+                                <Check size={13} strokeWidth={2.8} aria-hidden="true" />
+                              ) : (
+                                <span aria-hidden="true">{getIngredientEmoji(item.name, item.category)}</span>
+                              )}
+                              <span>{item.name}</span>
+                              {item.state === "expiring" && <em className="mini-state expiring">快过期</em>}
+                              {item.state === "priority" && <em className="mini-state priority">优先用</em>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {selectedIngredientIds.length > 0 && (
+                        <button
+                          type="button"
+                          className="btn-ghost-xs"
+                          onClick={() => setSelectedIngredientIds([])}
+                          disabled={loading}
+                        >
+                          清空已选食材
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {app.ingredients.length === 0 && (
                 <div className="subtle-info-note">
                   家里目前还没有登记食材，建议切换到「🛒 没菜了·买什么菜」直接生成买菜与菜单方案。
@@ -631,7 +719,13 @@ export function MealPlannerSheet({
                 disabled={loading || busy}
               >
                 {loading ? <LoaderCircle size={17} className="spin" /> : <Sparkles size={17} />}
-                <span>{loading ? "正在为你搭配这顿饭..." : "帮我搭配这顿饭"}</span>
+                <span>
+                  {loading
+                    ? "正在为你搭配这顿饭..."
+                    : selectedIngredientIds.length > 0
+                      ? `用已选 ${selectedIngredientIds.length} 种食材搭配`
+                      : "帮我搭配这顿饭"}
+                </span>
               </button>
             </div>
           ) : (

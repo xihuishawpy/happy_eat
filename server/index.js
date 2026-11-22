@@ -250,6 +250,14 @@ app.post("/api/meal-plan/suggest", async (req, res) => {
   const shoppingMode = req.body?.shoppingMode === "fresh" ? "fresh" : "top_up";
 
   const appState = readAppState();
+  const selectedIds = Array.isArray(req.body?.selectedIngredientIds)
+    ? new Set(req.body.selectedIngredientIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))
+    : new Set();
+  const focusIngredients = [
+    ...(Array.isArray(req.body?.focusIngredients) ? req.body.focusIngredients.map((n) => String(n || "").trim()) : []),
+    ...appState.ingredients.filter((item) => selectedIds.has(Number(item.id))).map((item) => item.name),
+  ].filter((name, idx, arr) => name && arr.indexOf(name) === idx).slice(0, 12);
+
   const formalRecipes = [...appState.matches.ready, ...appState.matches.missing];
   const params = {
     mode,
@@ -263,6 +271,7 @@ app.post("/api/meal-plan/suggest", async (req, res) => {
     maxMinutes,
     excludeTitles,
     shoppingMode,
+    focusIngredients,
   };
 
   if (!llmConfigured || (mode === "use_existing" && appState.ingredients.length === 0)) {

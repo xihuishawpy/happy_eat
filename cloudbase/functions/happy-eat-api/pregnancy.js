@@ -285,6 +285,65 @@ export function evaluateRecipePregnancy(recipe, ingredientsByName = new Map()) {
   return { level, summary, items };
 }
 
+/**
+ * Evaluate dynamic dietary preference warnings for a recipe based on family dietaryNotes
+ * (e.g., "不吃香菜", "少辣清淡", "不吃葱蒜", "注意控糖") combined with recipe.preferenceWarning.
+ */
+export function evaluateRecipeDietaryAlerts(recipe, settings = defaultFamilySettings()) {
+  const alerts = [];
+  const addAlert = (label) => {
+    if (label && !alerts.includes(label)) alerts.push(label);
+  };
+
+  const ingNames = (recipe?.ingredients || []).map((item) => String(item?.name || "")).filter(Boolean);
+  const title = String(recipe?.title || "");
+  const prefWarn = String(recipe?.preferenceWarning || "").trim();
+  const notes = String(settings?.dietaryNotes || "").trim();
+
+  if (prefWarn) addAlert(prefWarn);
+
+  if (notes) {
+    const hasIng = (re) => ingNames.some((n) => re.test(n));
+    if (/(?:不吃|不要|忌)香菜/.test(notes) && (hasIng(/香菜/) || /香菜/.test(title))) {
+      addAlert("含香菜");
+    }
+    if (/(?:不吃|不要|忌)葱/.test(notes) && (hasIng(/葱/) || /葱/.test(title))) {
+      addAlert("含葱");
+    }
+    if (/(?:不吃|不要|忌).*蒜/.test(notes) && (hasIng(/蒜/) || /蒜/.test(title))) {
+      addAlert("含蒜");
+    }
+    if (/(?:不吃|不要|忌)姜/.test(notes) && (hasIng(/姜/) || /姜/.test(title))) {
+      addAlert("含姜");
+    }
+    if (/(?:少辣|不吃辣|忌辣|不辣)/.test(notes) && (hasIng(/辣|花椒|麻椒|豆瓣酱/) || /辣/.test(title) || /辣/.test(prefWarn))) {
+      if (!alerts.some((a) => /辣/.test(a))) addAlert("偏辣");
+    }
+    if (/(?:控糖|少糖|无糖)/.test(notes) && (hasIng(/白糖|冰糖|红糖|蜂蜜/) || /糖醋|拔丝/.test(title))) {
+      addAlert("含糖注意");
+    }
+    if (/(?:不吃海鲜|海鲜过敏|忌海鲜)/.test(notes) && hasIng(/虾|鱼|蟹|贝|蛤|鱿鱼|扇贝|生蚝/)) {
+      addAlert("含海鲜");
+    }
+    if (/(?:不吃花生|花生过敏|忌花生)/.test(notes) && hasIng(/花生/)) {
+      addAlert("含花生");
+    }
+
+    // Generic "不吃XX / 忌XX" matching against ingredient names
+    const genericRegex = /(?:不吃|不要|忌)([\u4e00-\u9fa5]{1,4})/g;
+    let match;
+    while ((match = genericRegex.exec(notes)) !== null) {
+      const target = match[1];
+      if (!target || /^(香菜|葱|蒜|葱蒜|姜|辣|糖|海鲜|花生|生冷|油腻)$/.test(target)) continue;
+      if (ingNames.some((n) => n.includes(target)) || title.includes(target)) {
+        addAlert(`含${target}`);
+      }
+    }
+  }
+
+  return alerts;
+}
+
 export function defaultFamilySettings(raw = null) {
   return {
     pregnancyMode: raw?.pregnancyMode === undefined ? true : Boolean(raw.pregnancyMode),
@@ -501,12 +560,17 @@ export function buildLocalMealSuggestions({
   mealsCount = 1,
   excludeTitles = [],
   shoppingMode = "top_up",
+  focusIngredients = [],
 }) {
   const count = Math.max(1, Math.min(4, Number(dishCount) || 2));
   const totalTargetDishes = mode === "shopping_plan" ? Math.min(6, count * Math.max(1, Math.min(3, Number(mealsCount) || 1))) : count;
   const availableSet = new Set(ingredients.map((item) => item.name));
   const ingMap = new Map(ingredients.map((item) => [item.name, item]));
   const excludeSet = new Set((excludeTitles || []).map((t) => String(t).trim()));
+  const focusList = (Array.isArray(focusIngredients) ? focusIngredients : [])
+    .map((n) => String(n || "").trim())
+    .filter(Boolean);
+  const focusSet = new Set(focusList);
 
   const isRecipePregnancySafe = (recipe) => {
     if (!settings.pregnancyMode) return true;
@@ -515,30 +579,48 @@ export function buildLocalMealSuggestions({
   };
 
   if (mode === "use_existing") {
+    const countFocusHits = (recipe) =>
+      focusSet.size === 0
+        ? 0
+        : (recipe.ingredients || []).filter((item) => focusSet.has(item.name)).length;
+
     const readyFormal = formalRecipes
       .filter((r) => (r.missing || []).length === 0 && !excludeSet.has(r.title))
       .filter(isRecipePregnancySafe)
-      .sort((a, b) => Number(b.usesPriority) - Number(a.usesPriority) || a.minutes - b.minutes);
+      .sort((a, b) =>
+        countFocusHits(b) - countFocusHits(a) ||
+        Number(b.usesPriority) - Number(a.usesPriority) ||
+        a.minutes - b.minutes,
+      );
 
-    const chosen = readyFormal.slice(0, count).map((r) => ({
-      title: r.title,
-      method: r.method,
-      minutes: r.minutes,
-      reason: r.usesPriority ? "优先消耗家里快过期或优先食材，材料全齐" : "家里现有食材齐全，直接就能开火",
-      pregnancyTip: settings.pregnancyMode ? "孕期烹饪请注意食材彻底熟透、少油少盐" : "",
-      preferenceWarning: r.preferenceWarning || "",
-      ingredients: r.ingredients,
-      steps: r.steps,
-      existingRecipeId: r.id,
-    }));
+    const chosen = readyFormal.slice(0, count).map((r) => {
+      const matchedFocus = focusList.filter((name) => (r.ingredients || []).some((item) => item.name === name));
+      return {
+        title: r.title,
+        method: r.method,
+        minutes: r.minutes,
+        reason: matchedFocus.length > 0
+          ? `顺手用掉指定的「${matchedFocus.join("、")}」，材料全齐`
+          : r.usesPriority
+            ? "优先消耗家里快过期或优先食材，材料全齐"
+            : "家里现有食材齐全，直接就能开火",
+        pregnancyTip: settings.pregnancyMode ? "孕期烹饪请注意食材彻底熟透、少油少盐" : "",
+        preferenceWarning: r.preferenceWarning || "",
+        ingredients: r.ingredients,
+        steps: r.steps,
+        existingRecipeId: r.id,
+      };
+    });
 
     // If fewer than requested dishes exist in formal recipes, synthesize simple dish from remaining safe ingredients
     if (chosen.length < count && ingredients.length >= 2) {
-      const safePool = ingredients.filter((item) => {
-        if (PANTRY_DEFAULTS.has(item.name) || item.category === "调味") return false;
-        if (!settings.pregnancyMode) return true;
-        return evaluateIngredientPregnancy(item.name, item).level !== "avoid";
-      });
+      const safePool = ingredients
+        .filter((item) => {
+          if (PANTRY_DEFAULTS.has(item.name) || item.category === "调味") return false;
+          if (!settings.pregnancyMode) return true;
+          return evaluateIngredientPregnancy(item.name, item).level !== "avoid";
+        })
+        .sort((a, b) => Number(focusSet.has(b.name)) - Number(focusSet.has(a.name)));
       const protein = safePool.find((i) => i.category === "肉禽蛋");
       const vegs = safePool.filter((i) => i.category === "蔬菜");
       const usedTitles = new Set(chosen.map((c) => c.title));
@@ -596,7 +678,7 @@ export function buildLocalMealSuggestions({
       title: `今日推荐 · ${chosen.length} 道菜${includeStaple ? " + 主食" : ""}`,
       summary:
         chosen.length > 0
-          ? `基于家里现有食材推荐，${settings.pregnancyMode ? "已避开孕期禁忌食材" : "操作省心"}`
+          ? `${focusList.length > 0 ? `已围绕「${focusList.slice(0, 3).join("、")}」搭配，` : "基于家里现有食材推荐，"}${settings.pregnancyMode ? "已避开孕期禁忌食材" : "操作省心"}`
           : "家里现有食材较少，建议切换到「规划买菜」看看买什么最合适",
       staple,
       meals: chosen,

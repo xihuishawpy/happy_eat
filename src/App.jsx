@@ -5,12 +5,12 @@ import {
   BookOpen,
   Check,
   ChefHat,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock3,
   Dice5,
-  FileText,
   Flame,
-  Globe,
   Home,
   Image,
   ListChecks,
@@ -40,6 +40,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PREGNANCY_DISCLAIMER,
   evaluateIngredientPregnancy,
+  evaluateRecipeDietaryAlerts,
 } from "../shared/pregnancy.js";
 import {
   MealPlannerSheet,
@@ -123,7 +124,6 @@ export default function App() {
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [cookingRecipe, setCookingRecipe] = useState(null);
   const [ingredientEditor, setIngredientEditor] = useState(null);
-  const [generationSelectorOpen, setGenerationSelectorOpen] = useState(false);
   const [mealPlannerMode, setMealPlannerMode] = useState(null); // null | "use_existing" | "shopping_plan"
   const [creatingManualRecipe, setCreatingManualRecipe] = useState(false);
   const [draftEditor, setDraftEditor] = useState(null);
@@ -770,29 +770,6 @@ export default function App() {
     }
   }
 
-  async function generateRecipe(ingredientIds) {
-    setPendingAction("recipe-generate");
-    setSyncState("syncing");
-    setError("");
-    try {
-      const result = await api("/api/recipes/generate", {
-        token,
-        method: "POST",
-        body: { ingredientIds },
-      });
-      setApp(result.app);
-      setGenerationSelectorOpen(false);
-      setCreateSheetOpen(false);
-      setDraftEditor(result.draft);
-      setSyncState("synced");
-    } catch (err) {
-      setError(err.message);
-      setSyncState("error");
-    } finally {
-      setPendingAction("");
-    }
-  }
-
   async function removeDraft(id) {
     setPendingAction("draft-delete");
     setSyncState("syncing");
@@ -965,8 +942,12 @@ export default function App() {
   }
 
   function pickRandomRecipe(excludeId = null) {
-    const pool = app.matches.ready.length > 0 ? app.matches.ready : app.matches.missing;
-    if (pool.length === 0) return;
+    const rawPool = app.matches.ready.length > 0 ? app.matches.ready : app.matches.missing;
+    if (rawPool.length === 0) return;
+    const safePool = pregnancyMode
+      ? rawPool.filter((r) => r.pregnancyWarning?.level !== "avoid")
+      : rawPool;
+    const pool = safePool.length > 0 ? safePool : rawPool;
     const candidates = pool.length > 1 && excludeId ? pool.filter((r) => r.id !== excludeId) : pool;
     // Slightly weight priority-using recipes so expiring ingredients get used up
     const weighted = [];
@@ -1044,25 +1025,24 @@ export default function App() {
                   <h1 className="header-title">{getMealQuestion()}</h1>
                 </div>
                 <button
-                  className={`family-avatar-btn sync-${syncState}`}
+                  className={`header-status-pill ${pregnancyMode ? "is-guard" : ""} sync-${syncState}`}
                   type="button"
                   onClick={() => setActiveTab("family")}
-                  aria-label={`进入${kitchenName}的家庭空间`}
-                  title={`${kitchenName} · ${syncState === "syncing" ? "同步中" : syncState === "error" ? "同步异常" : "已同步"}`}
+                  aria-label={pregnancyMode ? "孕期饮食守护已开启，点击管理家庭饮食档案" : "管理家庭饮食档案"}
+                  title={`${pregnancyMode ? "孕期守护中" : "孕期守护已关"} · ${syncState === "syncing" ? "同步中" : syncState === "error" ? "同步异常" : "已同步"}`}
                 >
-                  <span aria-hidden="true">🏠</span>
+                  <span aria-hidden="true">{pregnancyMode ? "🤰" : "🍽"}</span>
+                  <span>{pregnancyMode ? "守护中" : "饮食档案"}</span>
                   <span className="sync-dot" aria-hidden="true" />
                 </button>
               </header>
 
-              {/* Hero Card */}
+              {/* Hero Card: focused on 2 primary family decisions */}
               <section className={`hero-card ${app.matches.ready.length === 0 ? "is-empty-fridge" : ""}`} aria-label="今日可做概览">
                 <div className="hero-content">
                   {app.matches.ready.length > 0 ? (
                     <>
-                      <div className="hero-label">
-                        家里食材现在就能做{pregnancyMode ? " · 🤰 孕期守护中" : ""}
-                      </div>
+                      <div className="hero-label">家里食材现在就能做</div>
                       <div className="hero-number">
                         <strong>{app.matches.ready.length}</strong>
                         <span>道菜</span>
@@ -1086,15 +1066,6 @@ export default function App() {
                         <button
                           className="hero-pick-btn"
                           type="button"
-                          onClick={() => pickRandomRecipe()}
-                          disabled={allRecipes.length === 0}
-                        >
-                          <Dice5 size={15} aria-hidden="true" />
-                          <span>帮我挑一道</span>
-                        </button>
-                        <button
-                          className="hero-pick-btn"
-                          type="button"
                           onClick={() => {
                             setError("");
                             setMealPlannerMode("shopping_plan");
@@ -1107,9 +1078,7 @@ export default function App() {
                     </>
                   ) : (
                     <>
-                      <div className="hero-label">
-                        冰箱快空啦{pregnancyMode ? " · 🤰 孕期守护中" : ""}
-                      </div>
+                      <div className="hero-label">冰箱快空啦</div>
                       <div className="hero-empty-title">不知道买什么菜？</div>
                       <div className="hero-stat">
                         当前 {app.ingredients.length} 种食材 · 帮你规划下顿 2 道菜 + 主食与买菜清单
@@ -1137,16 +1106,6 @@ export default function App() {
                           <Sparkles size={15} aria-hidden="true" />
                           <span>帮我想吃什么</span>
                         </button>
-                        {allRecipes.length > 0 && (
-                          <button
-                            className="hero-pick-btn"
-                            type="button"
-                            onClick={() => pickRandomRecipe()}
-                          >
-                            <Dice5 size={15} aria-hidden="true" />
-                            <span>帮我挑一道</span>
-                          </button>
-                        )}
                       </div>
                     </>
                   )}
@@ -1215,105 +1174,43 @@ export default function App() {
                 </section>
               )}
 
-              {/* Always-visible Voice-First Quick Composer */}
-              <section className="quick-composer-card" aria-label="快速记录新食材">
-                <div className="quick-composer-row">
-                  <input
-                    type="text"
-                    className="quick-composer-input"
-                    value={batchText}
-                    onChange={(event) => handleBatchTextChange(event.target.value)}
-                    onCompositionStart={() => {
-                      batchComposingRef.current = true;
-                    }}
-                    onCompositionEnd={() => {
-                      batchComposingRef.current = false;
-                    }}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        !event.nativeEvent.isComposing &&
-                        !batchComposingRef.current &&
-                        batchText.trim() &&
-                        !busy
-                      ) {
-                        event.preventDefault();
-                        addBatchIngredients();
-                      }
-                    }}
-                    placeholder="家里新添了什么？说一句就行"
-                    aria-label="家里新添了什么"
-                    disabled={busy}
-                  />
-                  <VoiceInputButton
-                    token={token}
-                    disabled={busy}
-                    onTranscript={(text) =>
-                      handleBatchTextChange(appendTranscript(batchText, text), { openPreview: true, origin: "voice" })
-                    }
-                    onError={setError}
-                  />
-                </div>
-                {batchText.trim() && (
-                  <div className="quick-composer-confirm">
-                    {batchPreviewOpen && batchPreviewItems.length > 0 && (
-                      <div className="quick-preview-pills">
-                        {batchPreviewItems.slice(0, 5).map((item) => (
-                          <span key={item.name} className="mini-preview-chip">
-                            {item.emoji} {item.name}
-                          </span>
-                        ))}
-                        {batchPreviewItems.length > 5 && (
-                          <span className="mini-preview-more">+{batchPreviewItems.length - 5}</span>
-                        )}
-                      </div>
-                    )}
-                    <div className="quick-composer-actions">
-                      <button
-                        type="button"
-                        className="btn-ghost-sm"
-                        onClick={() => handleBatchTextChange("")}
-                        disabled={busy}
-                      >
-                        清空
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-primary-sm"
-                        onClick={() => addBatchIngredients()}
-                        disabled={busy}
-                      >
-                        <Sparkles size={14} aria-hidden="true" />
-                        {pendingAction === "batch" ? "正在添加" : "解析并添加"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* Segmented Match Control */}
+              {/* Segmented Match Control + Inline Random Pick from Family Recipes */}
               <div className="matches-section">
-                <div className="segmented-control" role="tablist" aria-label="菜谱匹配分类">
-                  <button
-                    type="button"
-                    role="tab"
-                    className={matchTab === "ready" ? "active" : ""}
-                    aria-selected={matchTab === "ready"}
-                    onClick={() => setMatchTab("ready")}
-                  >
-                    <span>现在能做</span>
-                    <em className="seg-badge ready">{todayReady.length}</em>
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    className={matchTab === "missing" ? "active" : ""}
-                    aria-selected={matchTab === "missing"}
-                    onClick={() => setMatchTab("missing")}
-                  >
-                    <span>差一点</span>
-                    <em className="seg-badge missing">{todayMissing.length}</em>
-                  </button>
+                <div className="matches-bar-row">
+                  <div className="segmented-control flex1" role="tablist" aria-label="菜谱匹配分类">
+                    <button
+                      type="button"
+                      role="tab"
+                      className={matchTab === "ready" ? "active" : ""}
+                      aria-selected={matchTab === "ready"}
+                      onClick={() => setMatchTab("ready")}
+                    >
+                      <span>现在能做</span>
+                      <em className="seg-badge ready">{todayReady.length}</em>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      className={matchTab === "missing" ? "active" : ""}
+                      aria-selected={matchTab === "missing"}
+                      onClick={() => setMatchTab("missing")}
+                    >
+                      <span>差一点</span>
+                      <em className="seg-badge missing">{todayMissing.length}</em>
+                    </button>
+                  </div>
+                  {allRecipes.length > 0 && (
+                    <button
+                      type="button"
+                      className="random-dice-btn"
+                      onClick={() => pickRandomRecipe()}
+                      aria-label="从自家菜谱随便挑一道"
+                      title="从自家菜谱随便挑一道"
+                    >
+                      <Dice5 size={16} aria-hidden="true" />
+                      <span>随便挑</span>
+                    </button>
+                  )}
                 </div>
 
                 {(todayPriorityOnly || todayIngredientFilter) && (
@@ -1337,6 +1234,7 @@ export default function App() {
                   recipes={todayVisibleRecipes}
                   urgentNameSet={urgentNameSet}
                   pregnancyMode={pregnancyMode}
+                  settings={settings}
                   busy={busy}
                   onOpen={setSelectedRecipe}
                   onAddMissingToShopping={addMissingToShoppingList}
@@ -1812,6 +1710,7 @@ export default function App() {
                   {libraryRecipes.map((recipe) => {
                     const visual = getRecipeVisual(recipe);
                     const isReady = recipe.missing.length === 0;
+                    const dietaryAlerts = evaluateRecipeDietaryAlerts(recipe, settings);
                     return (
                       <article
                         key={recipe.id}
@@ -1849,8 +1748,8 @@ export default function App() {
                           <div className="grid-card-meta">
                             <span>⏱ {recipe.minutes} 分钟</span>
                             <span>· {recipe.method}</span>
-                            {recipe.preferenceWarning && (
-                              <span className="meta-warn">· {recipe.preferenceWarning}</span>
+                            {dietaryAlerts.length > 0 && (
+                              <span className="meta-warn">· {dietaryAlerts[0]}</span>
                             )}
                           </div>
                         </div>
@@ -1868,16 +1767,10 @@ export default function App() {
               app={app}
               kitchenName={kitchenName}
               totalRecipes={allRecipes.length}
-              allRecipes={allRecipes}
               syncState={syncState}
               busy={busy}
               onRefresh={refresh}
               onUpdateSettings={updateFamilySettings}
-              onOpenCreate={() => {
-                setError("");
-                setCreateNotice("");
-                setCreateSheetOpen(true);
-              }}
               onSignOut={signOutFamily}
             />
           )}
@@ -1951,6 +1844,7 @@ export default function App() {
           <RandomPickSheet
             recipe={randomPick}
             urgentNameSet={urgentNameSet}
+            pregnancyMode={pregnancyMode}
             canReroll={(app.matches.ready.length > 0 ? app.matches.ready.length : app.matches.missing.length) > 1}
             onReroll={() => pickRandomRecipe(randomPick.id)}
             onViewDetail={() => {
@@ -1993,7 +1887,6 @@ export default function App() {
           <CreateRecipeSheet
             app={app}
             token={token}
-            urgentIngredients={urgentIngredients}
             draftSource={draftSource}
             setDraftSource={setDraftSource}
             draftText={draftText}
@@ -2008,10 +1901,6 @@ export default function App() {
             setNotice={setCreateNotice}
             onSelectImage={selectDraftImage}
             onAnalyze={analyzeDraft}
-            onOpenAiGenerate={() => {
-              setError("");
-              setGenerationSelectorOpen(true);
-            }}
             onOpenManualRecipe={() => {
               setError("");
               setCreatingManualRecipe(true);
@@ -2036,6 +1925,7 @@ export default function App() {
             availableNames={availableNames}
             pantrySet={pantrySet}
             pregnancyMode={pregnancyMode}
+            settings={settings}
             busy={busy}
             deleting={pendingAction === "recipe-delete"}
             error={error}
@@ -2068,20 +1958,6 @@ export default function App() {
             onComplete={(consumptions, opts) => completeCooking(cookingRecipe, consumptions, opts)}
             onClose={() => {
               setCookingRecipe(null);
-              setError("");
-            }}
-          />
-        )}
-
-        {/* AI Ingredient Selection Sheet */}
-        {generationSelectorOpen && (
-          <IngredientSelectionSheet
-            categories={app.categories}
-            busy={pendingAction === "recipe-generate"}
-            error={error}
-            onGenerate={generateRecipe}
-            onClose={() => {
-              setGenerationSelectorOpen(false);
               setError("");
             }}
           />
@@ -2181,7 +2057,7 @@ function getMealQuestion() {
    SUBCOMPONENTS: TODAY LIST & RANDOM PICK
    ============================================================ */
 
-function TodayRecipeList({ recipes, urgentNameSet, pregnancyMode, busy, onOpen, onAddMissingToShopping, emptyMessage, onQuickAction }) {
+function TodayRecipeList({ recipes, urgentNameSet, pregnancyMode, settings, busy, onOpen, onAddMissingToShopping, emptyMessage, onQuickAction }) {
   if (recipes.length === 0) {
     return (
       <div className="empty-card">
@@ -2205,6 +2081,7 @@ function TodayRecipeList({ recipes, urgentNameSet, pregnancyMode, busy, onOpen, 
         const pregWarn = pregnancyMode && recipe.pregnancyWarning?.level && recipe.pregnancyWarning.level !== "safe"
           ? recipe.pregnancyWarning
           : null;
+        const dietaryAlerts = evaluateRecipeDietaryAlerts(recipe, settings);
 
         return (
           <article
@@ -2241,7 +2118,9 @@ function TodayRecipeList({ recipes, urgentNameSet, pregnancyMode, busy, onOpen, 
                 ) : (
                   <span className="tag-pill tag-orange">缺：{recipe.missing.slice(0, 2).join("、")}{recipe.missing.length > 2 ? "…" : ""}</span>
                 )}
-                {recipe.preferenceWarning && <span className="tag-pill tag-red">{recipe.preferenceWarning}</span>}
+                {dietaryAlerts.slice(0, 2).map((alertText) => (
+                  <span key={alertText} className="tag-pill tag-red">{alertText}</span>
+                ))}
                 {pregWarn && (
                   <span className={`tag-pill ${pregWarn.level === "avoid" ? "tag-red" : "tag-amber"}`}>
                     🤰 {pregWarn.level === "avoid" ? "孕期避免" : "孕期注意"}
@@ -2274,10 +2153,13 @@ function TodayRecipeList({ recipes, urgentNameSet, pregnancyMode, busy, onOpen, 
   );
 }
 
-function RandomPickSheet({ recipe, urgentNameSet, canReroll, onReroll, onViewDetail, onStartCooking, onClose }) {
+function RandomPickSheet({ recipe, urgentNameSet, pregnancyMode, canReroll, onReroll, onViewDetail, onStartCooking, onClose }) {
   const visual = getRecipeVisual(recipe);
   const isReady = recipe.missing.length === 0;
   const matchedUrgent = recipe.ingredients.find((item) => item.required && urgentNameSet.has(item.name));
+  const pregWarn = pregnancyMode && recipe.pregnancyWarning?.level && recipe.pregnancyWarning.level !== "safe"
+    ? recipe.pregnancyWarning
+    : null;
 
   useBodyLockAndEscape(false, onClose);
 
@@ -2296,7 +2178,7 @@ function RandomPickSheet({ recipe, urgentNameSet, canReroll, onReroll, onViewDet
         </button>
 
         <div className="pick-body">
-          <span className="pick-eyebrow">🎲 今天不如就做这道</span>
+          <span className="pick-eyebrow">🎲 自家菜谱随便挑一道</span>
           <div className={`pick-emoji-circle tone-${visual.tone}`} aria-hidden="true">
             {visual.emoji}
           </div>
@@ -2310,6 +2192,11 @@ function RandomPickSheet({ recipe, urgentNameSet, canReroll, onReroll, onViewDet
               <span className="tag-pill tag-green">✓ 食材齐全</span>
             ) : (
               <span className="tag-pill tag-orange">缺 {recipe.missing.length} 样</span>
+            )}
+            {pregWarn && (
+              <span className={`tag-pill ${pregWarn.level === "avoid" ? "tag-red" : "tag-amber"}`}>
+                🤰 {pregWarn.level === "avoid" ? "孕期避免" : "孕期注意"}
+              </span>
             )}
           </div>
           {matchedUrgent && (
@@ -2412,6 +2299,7 @@ function RecipeDetailSheet({
   availableNames,
   pantrySet,
   pregnancyMode,
+  settings,
   busy,
   deleting,
   error,
@@ -2422,6 +2310,7 @@ function RecipeDetailSheet({
   onStartCooking,
 }) {
   const visual = getRecipeVisual(recipe);
+  const dietaryAlerts = evaluateRecipeDietaryAlerts(recipe, settings);
   const required = recipe.ingredients.filter((item) => item.required);
   const optional = recipe.ingredients.filter((item) => !item.required);
   const nonPantryRequired = required.filter((item) => !pantrySet.has(item.name));
@@ -2483,9 +2372,9 @@ function RecipeDetailSheet({
               <span className="pill-chip">
                 {getMethodEmoji(recipe.method)} {recipe.method}
               </span>
-              {recipe.preferenceWarning && (
-                <span className="tag-pill tag-red">⚠️ {recipe.preferenceWarning}</span>
-              )}
+              {dietaryAlerts.map((warn) => (
+                <span key={warn} className="tag-pill tag-red">⚠️ {warn}</span>
+              ))}
             </div>
 
             {isReady ? (
@@ -2687,7 +2576,6 @@ function RecipeDetailSheet({
 function CreateRecipeSheet({
   app,
   token,
-  urgentIngredients,
   draftSource,
   setDraftSource,
   draftText,
@@ -2702,13 +2590,12 @@ function CreateRecipeSheet({
   setNotice,
   onSelectImage,
   onAnalyze,
-  onOpenAiGenerate,
   onOpenManualRecipe,
   onOpenDraft,
   onDeleteDraft,
   onClose,
 }) {
-  const [importMode, setImportMode] = useState(null); // null = menu | "image" | "text" | "web" | "voice"
+  const [importMode, setImportMode] = useState(null); // null = menu | "image" | "text" | "web"
   const [deletingDraftId, setDeletingDraftId] = useState(null);
 
   useBodyLockAndEscape(busy, onClose);
@@ -2717,7 +2604,7 @@ function CreateRecipeSheet({
     setError("");
     setNotice("");
     setImportMode(mode);
-    setDraftSource(mode === "voice" ? "text" : mode);
+    setDraftSource(mode);
   }
 
   async function submitImport() {
@@ -2726,11 +2613,6 @@ function CreateRecipeSheet({
       setImportMode(null);
     }
   }
-
-  const urgentSummary =
-    urgentIngredients.length > 0
-      ? `优先用掉${urgentIngredients.slice(0, 3).map((i) => i.name).join("、")}`
-      : "根据家里现有食材智能定制";
 
   return (
     <div className="sheet-backdrop" role="presentation" onClick={() => !busy && onClose()}>
@@ -2746,7 +2628,10 @@ function CreateRecipeSheet({
         {!importMode ? (
           <div className="sheet-inner">
             <header className="sheet-top-row">
-              <h2 id="create-sheet-title">添加菜谱</h2>
+              <div>
+                <h2 id="create-sheet-title">添加菜谱</h2>
+                <p className="sheet-subtitle">手动写自家拿手菜，或从文字、语音、图片与网页导入</p>
+              </div>
               <button className="sheet-close-btn" type="button" onClick={onClose} disabled={busy} aria-label="关闭添加菜谱">
                 <X size={18} />
               </button>
@@ -2759,59 +2644,25 @@ function CreateRecipeSheet({
               </div>
             )}
 
-            {/* Dark AI Card */}
-            <div className="ai-hero-card">
-              <div className="ai-card-eyebrow">AI 帮我配菜</div>
-              <div className="ai-card-title">用家里的 {app.ingredients.length} 种食材，想一道新菜</div>
-              <div className="ai-card-desc">
-                {app.ai.configured ? urgentSummary : "尚未配置 AI 模型，仍可使用下方导入功能"}
-              </div>
-              <button
-                type="button"
-                className="ai-card-btn"
-                onClick={onOpenAiGenerate}
-                disabled={busy || !app.ai.configured || app.ingredients.length === 0}
-              >
-                <Sparkles size={15} />
-                <span>选食材并生成</span>
-              </button>
-              <span className="ai-card-deco" aria-hidden="true">
-                🧑‍🍳
-              </span>
-            </div>
-
-            {/* 4 Quick Import Sources */}
+            {/* 4 Distinct Recipe Entry Sources */}
             <div className="import-source-grid">
+              <button type="button" className="import-source-tile primary-tile" onClick={onOpenManualRecipe} disabled={busy}>
+                <span className="source-emoji" aria-hidden="true">✏️</span>
+                <span>手动写菜谱</span>
+              </button>
+              <button type="button" className="import-source-tile" onClick={() => enterImport("text")} disabled={busy}>
+                <span className="source-emoji" aria-hidden="true">📝</span>
+                <span>文字 / 语音</span>
+              </button>
               <button type="button" className="import-source-tile" onClick={() => enterImport("image")} disabled={busy}>
                 <span className="source-emoji" aria-hidden="true">📷</span>
                 <span>拍照识别</span>
-              </button>
-              <button type="button" className="import-source-tile" onClick={() => enterImport("text")} disabled={busy}>
-                <span className="source-emoji" aria-hidden="true">📋</span>
-                <span>粘贴文字</span>
               </button>
               <button type="button" className="import-source-tile" onClick={() => enterImport("web")} disabled={busy}>
                 <span className="source-emoji" aria-hidden="true">🔗</span>
                 <span>网页链接</span>
               </button>
-              <button type="button" className="import-source-tile" onClick={() => enterImport("voice")} disabled={busy}>
-                <span className="source-emoji" aria-hidden="true">🎙</span>
-                <span>口述菜谱</span>
-              </button>
             </div>
-
-            {onOpenManualRecipe && (
-              <button
-                type="button"
-                className="manual-recipe-entry-btn"
-                onClick={onOpenManualRecipe}
-                disabled={busy}
-              >
-                <Pencil size={15} aria-hidden="true" />
-                <span>手动写一道自家拿手菜</span>
-                <ChevronRight size={16} aria-hidden="true" />
-              </button>
-            )}
 
             {/* Pending Drafts */}
             <div className="section-head" style={{ marginTop: 18 }}>
@@ -2822,7 +2673,7 @@ function CreateRecipeSheet({
             {app.drafts.length === 0 ? (
               <div className="drafts-empty-hint">
                 <Bell size={15} aria-hidden="true" />
-                <span>导入或 AI 生成的菜谱草稿会保存在这里等你核对。</span>
+                <span>通过文字、拍照或网页导入的草稿会保存在这里等你核对。</span>
               </div>
             ) : (
               <div className="draft-compact-list">
@@ -2908,9 +2759,7 @@ function CreateRecipeSheet({
                     ? "拍照识别菜谱"
                     : importMode === "web"
                       ? "网页链接导入"
-                      : importMode === "voice"
-                        ? "口述菜谱"
-                        : "粘贴文字导入"}
+                      : "文字 / 语音导入"}
                 </h2>
               </div>
               <button className="sheet-close-btn" type="button" onClick={onClose} disabled={busy} aria-label="关闭添加菜谱">
@@ -2923,7 +2772,7 @@ function CreateRecipeSheet({
                 <>
                   {app.ai.configured && !app.ai.visionModel && (
                     <p className="subtle-info-note">
-                      当前使用纯文本模型（{app.ai.textModel}），建议优先用「粘贴文字」或「网页链接」导入。
+                      当前使用纯文本模型（{app.ai.textModel}），建议优先用「文字 / 语音」或「网页链接」导入。
                     </p>
                   )}
                   <label className="image-dropzone">
@@ -2960,12 +2809,8 @@ function CreateRecipeSheet({
                     rows={5}
                     value={draftText}
                     onChange={(event) => setDraftText(event.target.value)}
-                    placeholder={
-                      importMode === "voice"
-                        ? "点右侧麦克风口述菜名、食材和做法，识别后自动填在这里"
-                        : "粘贴小红书、下厨房或家人发来的菜谱文字"
-                    }
-                    autoFocus={importMode !== "voice"}
+                    placeholder="粘贴小红书、下厨房或家人发来的菜谱文字，也可以点下方麦克风直接口述"
+                    autoFocus
                   />
                   <div className="voice-import-bar">
                     <span className="muted-sm">支持语音转文字，随时补充修改</span>
@@ -3618,12 +3463,13 @@ function playGentleChime() {
    FAMILY SPACE TAB
    ============================================================ */
 
-function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState, busy, onRefresh, onUpdateSettings, onOpenCreate, onSignOut }) {
+function FamilySpaceTab({ app, kitchenName, totalRecipes, syncState, busy, onRefresh, onUpdateSettings, onSignOut }) {
   const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [pantryExpanded, setPantryExpanded] = useState(false);
   const settings = app.settings || { pregnancyMode: true, dietaryNotes: "", defaultMealStyle: "2菜+主食" };
   const [dietaryDraft, setDietaryDraft] = useState(settings.dietaryNotes || "");
-  const preferenceTags = [...new Set(allRecipes.map((r) => r.preferenceWarning).filter(Boolean))];
-  const quickDietaryTags = ["孕早期", "孕中期", "孕晚期", "注意控糖", "少辣清淡", "不吃香菜"];
+  const quickDietaryTags = ["孕早期", "孕中期", "孕晚期", "注意控糖", "少辣清淡", "不吃香菜", "不吃葱蒜"];
+  const pendingBuyCount = (app.shoppingPlan?.items || []).filter((i) => !i.checked).length;
 
   useEffect(() => {
     setDietaryDraft(settings.dietaryNotes || "");
@@ -3640,41 +3486,16 @@ function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState,
       <header className="page-header">
         <div>
           <h1 className="header-title">家庭</h1>
-          <p className="header-sub">{kitchenName} · 共享家庭空间</p>
+          <p className="header-sub">{kitchenName} · 全家同步</p>
         </div>
       </header>
 
-      {/* Family Overview Card */}
-      <section className="family-hero-card">
-        <div className="family-hero-top">
-          <div className="family-big-avatar" aria-hidden="true">🏠</div>
-          <div>
-            <h2>{kitchenName}</h2>
-            <p>{app.family.accessMode}共享 · 全家同步</p>
-          </div>
-        </div>
-        <div className="family-stats-grid">
-          <div>
-            <strong>{app.ingredients.length}</strong>
-            <span>可用食材</span>
-          </div>
-          <div>
-            <strong>{totalRecipes}</strong>
-            <span>正式菜谱</span>
-          </div>
-          <div>
-            <strong>{app.drafts.length}</strong>
-            <span>待确认草稿</span>
-          </div>
-        </div>
-      </section>
-
-      {/* Pregnancy Dietary Protection Settings */}
+      {/* Unified Family Dietary Profile Card (Pregnancy Guard + Family Preferences/Restrictions) */}
       <section className="settings-card pregnancy-settings-card" aria-labelledby="pregnancy-settings-heading">
         <div className="settings-row">
           <div className="settings-row-text">
-            <strong id="pregnancy-settings-heading">🤰 孕期饮食守护</strong>
-            <span>新增食材自动提示孕期是否适合，AI 推荐与买菜自动避开高风险食材</span>
+            <strong id="pregnancy-settings-heading">🤰 家庭饮食档案 · 孕期守护</strong>
+            <span>新增食材自动提示孕期适用性，同时约束 AI 配菜、买菜规划与本地菜谱提醒</span>
           </div>
           <button
             type="button"
@@ -3691,13 +3512,13 @@ function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState,
 
         <div className="dietary-notes-block">
           <label className="field-block">
-            <span>家庭阶段与饮食备注（AI 配菜与买菜规划会自动遵循）</span>
+            <span>阶段与家庭忌口备注（自动标红含忌口菜谱并同步给 AI）</span>
             <input
               className="styled-input sm"
               value={dietaryDraft}
               onChange={(event) => setDietaryDraft(event.target.value)}
               maxLength={120}
-              placeholder="例如：孕中期、注意控糖、少辣清淡"
+              placeholder="例如：孕中期、注意控糖、少辣清淡、不吃香菜"
               disabled={busy}
             />
           </label>
@@ -3732,6 +3553,31 @@ function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState,
         </div>
       </section>
 
+      {/* Compact Family Overview Card */}
+      <section className="family-hero-card">
+        <div className="family-hero-top">
+          <div className="family-big-avatar" aria-hidden="true">🏠</div>
+          <div>
+            <h2>{kitchenName}</h2>
+            <p>{app.family.accessMode}共享 · 默认每顿 2 菜 + 主食</p>
+          </div>
+        </div>
+        <div className="family-stats-grid">
+          <div>
+            <strong>{app.ingredients.length}</strong>
+            <span>可用食材</span>
+          </div>
+          <div>
+            <strong>{totalRecipes}</strong>
+            <span>自家菜谱</span>
+          </div>
+          <div>
+            <strong>{pendingBuyCount}</strong>
+            <span>待买食材</span>
+          </div>
+        </div>
+      </section>
+
       {/* Sync & AI Card */}
       <section className="settings-card" aria-label="同步与 AI 状态">
         <div className="settings-row">
@@ -3755,66 +3601,41 @@ function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState,
             <strong>AI 菜谱助手</strong>
             <span>
               {app.ai.configured
-                ? `已启用（${app.ai.textModel || "已配置"}${app.ai.visionModel ? ` · 视觉 ${app.ai.visionModel}` : ""}）· ${
-                    app.ai.visionModel && app.ai.asrConfigured
-                      ? "支持文字、拍照识谱与语音"
-                      : app.ai.visionModel
-                        ? "支持文字与拍照识谱"
-                        : "支持文字与网页导入"
-                  }`
-                : "未配置 AI 模型密钥"}
+                ? `已启用（${app.ai.textModel || "已配置"}${app.ai.visionModel ? ` · 视觉 ${app.ai.visionModel}` : ""}）`
+                : "未配置 AI 模型密钥（仍可使用本地规则）"}
             </span>
           </div>
           <span className={`tag-pill ${app.ai.configured ? "tag-green" : "tag-orange"}`}>
             {app.ai.configured ? "已就绪" : "未配置"}
           </span>
         </div>
-        {app.drafts.length > 0 && (
-          <div className="settings-row">
-            <div className="settings-row-text">
-              <strong>待确认草稿</strong>
-              <span>还有 {app.drafts.length} 份菜谱草稿未正式入库</span>
-            </div>
-            <button type="button" className="draft-confirm-pill" onClick={onOpenCreate}>
-              去查看
-            </button>
-          </div>
-        )}
       </section>
 
-      {/* Pantry Section */}
+      {/* Collapsible Pantry Section */}
       <section className="settings-card" aria-labelledby="pantry-heading">
-        <div className="settings-block-head">
-          <h3 id="pantry-heading">🧂 常备调味品</h3>
-          <span>默认家里常有</span>
-        </div>
-        <p className="settings-desc">以下调味品在匹配菜谱时默认视为可用，不需要每天登记在可用食材清单中。</p>
-        <div className="pantry-chips">
-          {(app.pantry || []).map((name) => (
-            <span key={name} className="pill-chip">
-              <span aria-hidden="true">{getIngredientEmoji(name, "调味")}</span>
-              <span>{name}</span>
-            </span>
-          ))}
-        </div>
-      </section>
-
-      {/* Preference Notes */}
-      <section className="settings-card" aria-labelledby="pref-heading">
-        <div className="settings-block-head">
-          <h3 id="pref-heading">🌶 忌口与饮食提醒</h3>
-          <span>参考提示</span>
-        </div>
-        <p className="settings-desc">
-          带有忌口提醒的菜谱会在卡片上标注并在推荐排序中靠后，帮助家人快速判断是否适合今天烹饪。
-        </p>
-        {preferenceTags.length > 0 && (
-          <div className="pantry-chips">
-            {preferenceTags.map((warn) => (
-              <span key={warn} className="tag-pill tag-red">
-                ⚠️ {warn}
-              </span>
-            ))}
+        <button
+          type="button"
+          className="pantry-collapse-btn"
+          aria-expanded={pantryExpanded}
+          onClick={() => setPantryExpanded((prev) => !prev)}
+        >
+          <div className="pantry-collapse-title">
+            <h3 id="pantry-heading">🧂 常备调味品</h3>
+            <span>默认家里已有 {(app.pantry || []).length} 项</span>
+          </div>
+          {pantryExpanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
+        </button>
+        {pantryExpanded && (
+          <div className="pantry-collapse-body">
+            <p className="settings-desc">以下调味品在匹配菜谱和规划买菜时默认视为已有，无需每天登记。</p>
+            <div className="pantry-chips">
+              {(app.pantry || []).map((name) => (
+                <span key={name} className="pill-chip">
+                  <span aria-hidden="true">{getIngredientEmoji(name, "调味")}</span>
+                  <span>{name}</span>
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </section>
@@ -3839,101 +3660,6 @@ function FamilySpaceTab({ app, kitchenName, totalRecipes, allRecipes, syncState,
             <span>退出当前家庭空间</span>
           </button>
         )}
-      </section>
-    </div>
-  );
-}
-
-/* ============================================================
-   AI INGREDIENT SELECTION SHEET
-   ============================================================ */
-
-function IngredientSelectionSheet({ categories, busy, error, onGenerate, onClose }) {
-  const [selectedIds, setSelectedIds] = useState([]);
-
-  useBodyLockAndEscape(busy, onClose);
-
-  function toggleIngredient(id) {
-    setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
-  }
-
-  return (
-    <div className="sheet-backdrop" role="presentation" onClick={() => !busy && onClose()}>
-      <section
-        className="bottom-sheet editor-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="ingredient-selection-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="sheet-grab" aria-hidden="true" />
-        <header className="sheet-top-row padded">
-          <div>
-            <h2 id="ingredient-selection-title">选择想用的食材</h2>
-            <p className="sheet-subtitle">不选时默认按全部食材推荐，优先消耗快过期食材</p>
-          </div>
-          <button className="sheet-close-btn" type="button" onClick={onClose} disabled={busy} aria-label="关闭食材选择">
-            <X size={18} />
-          </button>
-        </header>
-
-        <div className="sheet-scroll-body">
-          {categories.map((category) => (
-            <section className="selection-group" key={category.name} aria-labelledby={`selection-${category.name}`}>
-              <h3 id={`selection-${category.name}`}>
-                {CATEGORY_EMOJI[category.name]} {category.name}
-              </h3>
-              <div className="selection-chip-grid">
-                {category.items.map((ingredient) => {
-                  const selected = selectedIds.includes(ingredient.id);
-                  return (
-                    <button
-                      key={ingredient.id}
-                      className={`selection-pill ${selected ? "selected" : ""}`}
-                      type="button"
-                      aria-label={`选择${ingredient.name}`}
-                      aria-pressed={selected}
-                      onClick={() => toggleIngredient(ingredient.id)}
-                      disabled={busy}
-                    >
-                      {selected ? (
-                        <Check size={14} strokeWidth={2.8} aria-hidden="true" />
-                      ) : (
-                        <span aria-hidden="true">{getIngredientEmoji(ingredient.name, ingredient.category)}</span>
-                      )}
-                      <span>{ingredient.name}</span>
-                      {stateShortLabels[ingredient.state] && (
-                        <small className={`mini-state ${ingredient.state}`}>{stateShortLabels[ingredient.state]}</small>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        {error && (
-          <div className="form-error padded-x" role="alert">
-            {error}
-          </div>
-        )}
-
-        <div className="sheet-sticky-actions">
-          {selectedIds.length > 0 && (
-            <button className="btn-soft" type="button" onClick={() => setSelectedIds([])} disabled={busy}>
-              清除选择
-            </button>
-          )}
-          <button className="btn-primary flex1" type="button" onClick={() => onGenerate(selectedIds)} disabled={busy}>
-            <Sparkles size={17} />
-            {busy
-              ? "AI 正在构思菜谱..."
-              : selectedIds.length > 0
-                ? `用已选 ${selectedIds.length} 种食材生成`
-                : "用全部食材生成"}
-          </button>
-        </div>
       </section>
     </div>
   );
