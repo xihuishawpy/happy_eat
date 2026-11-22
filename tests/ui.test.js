@@ -34,8 +34,8 @@ test("家庭成员 can use the redesigned mobile cooking flow", { skip: process.
     await page.getByRole("button", { name: "进入" }).click();
     await page.locator(".hero-card").waitFor();
 
-    // Today layout: streamlined 2-button Hero + inline Random Pick beside match tabs
-    assert.equal(await page.locator(".hero-card .hero-pick-btn").count(), 2);
+    // Today layout: single unified Hero CTA + inline Random Pick beside match tabs
+    assert.equal(await page.locator(".hero-card .hero-pick-btn").count(), 1);
     assert.equal(await page.getByLabel("家里新添了什么").count(), 0);
     await page.getByRole("button", { name: "从自家菜谱随便挑一道" }).click();
     const pickDialog = page.getByRole("dialog");
@@ -280,7 +280,7 @@ test("家庭成员 can select focus ingredients inside unified Meal Planner", { 
     await page.getByLabel("家庭访问码").fill(server.accessCode);
     await page.getByRole("button", { name: "进入" }).click();
 
-    await page.getByRole("button", { name: "帮我想吃什么" }).click();
+    await page.getByRole("button", { name: /帮我想吃什么/ }).click();
     const planner = page.getByRole("dialog", { name: "今日点菜与买菜规划" });
     await planner.getByRole("button", { name: /指定想用的食材/ }).click();
     await planner.getByRole("button", { name: "指定食材番茄" }).click();
@@ -317,7 +317,7 @@ test("家庭成员 can use meal planner, shopping list, manual recipe, and pregn
     await page.locator(".hero-card").waitFor();
 
     // 1. Meal Planner: "帮我想吃什么" (default 2 dishes + staple) -> direct cook
-    await page.getByRole("button", { name: "帮我想吃什么" }).click();
+    await page.getByRole("button", { name: /帮我想吃什么/ }).click();
     const planner = page.getByRole("dialog", { name: "今日点菜与买菜规划" });
     await planner.getByRole("button", { name: "帮我搭配这顿饭" }).click();
     await planner.locator(".planner-dish-card").first().waitFor();

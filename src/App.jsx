@@ -1061,18 +1061,7 @@ export default function App() {
                           }}
                         >
                           <Sparkles size={16} aria-hidden="true" />
-                          <span>帮我想吃什么</span>
-                        </button>
-                        <button
-                          className="hero-pick-btn"
-                          type="button"
-                          onClick={() => {
-                            setError("");
-                            setMealPlannerMode("shopping_plan");
-                          }}
-                        >
-                          <ShoppingCart size={15} aria-hidden="true" />
-                          <span>规划买菜</span>
+                          <span>帮我想吃什么 / 买什么</span>
                         </button>
                       </div>
                     </>
@@ -1094,17 +1083,6 @@ export default function App() {
                         >
                           <ShoppingCart size={16} aria-hidden="true" />
                           <span>规划买菜与菜单</span>
-                        </button>
-                        <button
-                          className="hero-pick-btn"
-                          type="button"
-                          onClick={() => {
-                            setError("");
-                            setMealPlannerMode("use_existing");
-                          }}
-                        >
-                          <Sparkles size={15} aria-hidden="true" />
-                          <span>帮我想吃什么</span>
                         </button>
                       </div>
                     </>
