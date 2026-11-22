@@ -304,7 +304,7 @@ async function suggestMealPlan(request, env) {
   const style = String(body?.style || "").trim().slice(0, 40);
   const maxMinutes = Math.max(0, Math.min(180, Number(body?.maxMinutes) || 0));
   const excludeTitles = Array.isArray(body?.excludeTitles)
-    ? body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 15)
+    ? body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 25)
     : [];
   const shoppingMode = body?.shoppingMode === "fresh" ? "fresh" : "top_up";
 
@@ -339,6 +339,7 @@ async function suggestMealPlan(request, env) {
   const raw = await callDashScopeJson({
     model: env.DASHSCOPE_TEXT_MODEL || DEFAULT_TEXT_MODEL,
     messages: buildMealPlanMessages(params),
+    temperature: 0.85,
   }, env);
   return json({ plan: sanitizeLlmMealPlan(raw, params) });
 }
@@ -1196,12 +1197,12 @@ function substituteFor(name) {
   return substitutes[name] || [];
 }
 
-async function callDashScopeJson({ model, messages }, env) {
+async function callDashScopeJson({ model, messages, temperature = 0.1 }, env) {
   const baseUrl = env.DASHSCOPE_BASE_URL || DEFAULT_BASE_URL;
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${env.DASHSCOPE_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, temperature: 0.1 }),
+    body: JSON.stringify({ model, messages, temperature }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(formatDashScopeError(payload.error?.message));

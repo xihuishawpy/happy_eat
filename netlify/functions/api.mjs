@@ -464,7 +464,7 @@ async function handleSuggestMealPlan(request, store, getEnv) {
   const style = String(body?.style || "").trim().slice(0, 40);
   const maxMinutes = Math.max(0, Math.min(180, Number(body?.maxMinutes) || 0));
   const excludeTitles = Array.isArray(body?.excludeTitles)
-    ? body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 15)
+    ? body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 25)
     : [];
   const shoppingMode = body?.shoppingMode === "fresh" ? "fresh" : "top_up";
 
@@ -500,7 +500,7 @@ async function handleSuggestMealPlan(request, store, getEnv) {
   }
 
   const messages = buildMealPlanMessages(params);
-  const raw = await callLlmJson(textLlm, messages);
+  const raw = await callLlmJson(textLlm, messages, { temperature: 0.85 });
   return json({ plan: sanitizeLlmMealPlan(raw, params) });
 }
 
@@ -1239,12 +1239,12 @@ async function extractRecipeWithLLM(sourceText, imageDataUrl, llm) {
   return callLlmJson(llm, messages);
 }
 
-async function callLlmJson(llm, messages) {
+async function callLlmJson(llm, messages, { temperature = 0.1 } = {}) {
   const body = {
     model: llm.model,
     messages,
-    temperature: 0.1,
-    ...(llm.provider === "deepseek" ? { response_format: { type: "json_object" }, max_tokens: 1500 } : {}),
+    temperature,
+    ...(llm.provider === "deepseek" ? { response_format: { type: "json_object" }, max_tokens: 1800 } : {}),
   };
   const response = await fetch(`${llm.baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",

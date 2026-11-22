@@ -385,9 +385,11 @@ test("Netlify Function retries optimistic concurrency conflicts", async () => {
 test("Netlify Function supports pregnancy safety, settings, manual recipes, meal planner, and shopping commit", async () => {
   const store = new MemoryBlobStore();
   const originalFetch = globalThis.fetch;
+  const recordedCalls = [];
   globalThis.fetch = async (url, init) => {
     const body = JSON.parse(init.body);
     const userPrompt = String(body.messages.at(-1)?.content || "");
+    recordedCalls.push({ temperature: body.temperature, userPrompt });
     if (userPrompt.includes("shoppingItems")) {
       return Response.json({
         choices: [{
@@ -484,11 +486,17 @@ test("Netlify Function supports pregnancy safety, settings, manual recipes, meal
     assert.equal(manualRes.status, 200);
     assert.equal(manualRes.payload.recipe.title, "清蒸鸡胸肉");
 
-    // AI shopping plan suggestion
+    // AI shopping plan suggestion (higher creativity temperature + no anchored example dishes)
     const planRes = await callApi(handler, "/api/meal-plan/suggest", {
       method: "POST",
-      body: { mode: "shopping_plan", dishCount: 2, mealsCount: 1, shoppingMode: "fresh" },
+      body: { mode: "shopping_plan", dishCount: 2, mealsCount: 1, shoppingMode: "fresh", excludeTitles: ["老菜1", "老菜2"] },
     });
+    const planCall = recordedCalls.find((c) => c.userPrompt.includes("shoppingItems"));
+    const pregCall = recordedCalls.find((c) => c.userPrompt.includes("冰草嫩芽"));
+    assert.equal(planCall.temperature, 0.85);
+    assert.equal(pregCall.temperature, 0.1);
+    assert.equal(planCall.userPrompt.includes("老菜1、老菜2"), true);
+    assert.equal(planCall.userPrompt.includes("\"title\":\"西蓝花炒虾仁\""), false);
     assert.equal(planRes.status, 200);
     assert.equal(planRes.payload.plan.generatedBy, "ai");
     assert.equal(planRes.payload.plan.shoppingItems.length, 2);

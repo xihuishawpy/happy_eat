@@ -245,7 +245,7 @@ app.post("/api/meal-plan/suggest", async (req, res) => {
   const style = String(req.body?.style || "").trim().slice(0, 40);
   const maxMinutes = Math.max(0, Math.min(180, Number(req.body?.maxMinutes) || 0));
   const excludeTitles = Array.isArray(req.body?.excludeTitles)
-    ? req.body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 15)
+    ? req.body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 25)
     : [];
   const shoppingMode = req.body?.shoppingMode === "fresh" ? "fresh" : "top_up";
 
@@ -281,6 +281,7 @@ app.post("/api/meal-plan/suggest", async (req, res) => {
   const raw = await callDashScopeJson({
     model: dashScopeTextModel,
     messages: buildMealPlanMessages(params),
+    temperature: 0.85,
   });
   res.json({ plan: sanitizeLlmMealPlan(raw, params) });
 });
@@ -1292,7 +1293,7 @@ function substituteFor(name) {
   return substitutes[name] || [];
 }
 
-async function callDashScopeJson({ model, messages }) {
+async function callDashScopeJson({ model, messages, temperature = 0.1 }) {
   const response = await fetch(`${dashScopeBaseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
@@ -1302,7 +1303,7 @@ async function callDashScopeJson({ model, messages }) {
     body: JSON.stringify({
       model,
       messages,
-      temperature: 0.1,
+      temperature,
     }),
   });
   const payload = await response.json().catch(() => ({}));

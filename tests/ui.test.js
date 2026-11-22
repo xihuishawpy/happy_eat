@@ -291,6 +291,14 @@ test("家庭成员 can select focus ingredients inside unified Meal Planner", { 
     await planner.getByText("自选番茄炒蛋").waitFor();
     assert.equal(receivedPrompt.includes("番茄、鸡蛋") || receivedPrompt.includes("鸡蛋、番茄"), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+
+    // Close and reopen planner -> previous suggestion is persisted in localStorage & sent as excludeTitles
+    await planner.getByRole("button", { name: "关闭点菜规划" }).click();
+    await page.getByRole("button", { name: /帮我想吃什么/ }).click();
+    const reopened = page.getByRole("dialog", { name: "今日点菜与买菜规划" });
+    await reopened.getByRole("button", { name: "帮我搭配这顿饭" }).click();
+    await reopened.getByText("自选番茄炒蛋").waitFor();
+    assert.equal(receivedPrompt.includes("自选番茄炒蛋"), true);
   } finally {
     await browser?.close();
     await server.stop();

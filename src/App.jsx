@@ -48,6 +48,7 @@ import {
   PregnancyBadge,
   PregnancyInfoBox,
   ShoppingPlanCard,
+  recordCookedMealTitle,
 } from "./MealPlannerAndPregnancy.jsx";
 import {
   CATEGORY_EMOJI,
@@ -875,6 +876,7 @@ export default function App() {
             }
           }
           setApp(latestApp);
+          recordCookedMealTitle(recipe.title);
           setCookingRecipe(null);
           setSelectedRecipe(null);
           sessionStorage.removeItem(`happy-eat-cooking-${recipe.id}`);
@@ -899,6 +901,7 @@ export default function App() {
       if (result.summary.removed > 0) changes.push(`移除 ${result.summary.removed} 项`);
       if (result.summary.prioritized > 0) changes.push(`${result.summary.prioritized} 项标为优先`);
       setApp(result.app);
+      recordCookedMealTitle(recipe.title);
       setCookingRecipe(null);
       setSelectedRecipe(null);
       sessionStorage.removeItem(`happy-eat-cooking-${recipe.id}`);

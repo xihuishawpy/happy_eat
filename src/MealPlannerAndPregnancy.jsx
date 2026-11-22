@@ -29,6 +29,36 @@ import {
   getRecipeVisual,
 } from "./foodEmoji.js";
 
+const RECENT_COOKED_KEY = "happy-eat-recent-cooked-meals";
+const RECENT_PLAN_PREFIX = "happy-eat-recent-plan-";
+
+function readStoredTitleList(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(parsed) ? parsed.map((t) => String(t || "").trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function appendStoredTitleList(key, titles, maxLen = 16) {
+  const incoming = (Array.isArray(titles) ? titles : []).map((t) => String(t || "").trim()).filter(Boolean);
+  if (incoming.length === 0) return readStoredTitleList(key);
+  const existing = readStoredTitleList(key).filter((t) => !incoming.includes(t));
+  const next = [...existing, ...incoming].slice(-maxLen);
+  try {
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Ignore storage quota / private mode errors
+  }
+  return next;
+}
+
+export function recordCookedMealTitle(title) {
+  if (!title) return;
+  appendStoredTitleList(RECENT_COOKED_KEY, [title], 10);
+}
+
 export function PregnancyBadge({ level, compact = false }) {
   if (!level) return null;
   const meta = PREGNANCY_LEVEL_META[level] || PREGNANCY_LEVEL_META.unknown;
@@ -411,7 +441,6 @@ export function MealPlannerSheet({
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState(null);
   const [localError, setLocalError] = useState("");
-  const [seenTitles, setSeenTitles] = useState([]);
   const [savedTitles, setSavedTitles] = useState([]);
   const [expandedSteps, setExpandedSteps] = useState({});
 
@@ -458,7 +487,15 @@ export function MealPlannerSheet({
     setLoading(true);
     setLocalError("");
     try {
-      const nextExclude = reroll && plan?.meals ? [...seenTitles, ...plan.meals.map((m) => m.title)] : [];
+      const storageKey = `${RECENT_PLAN_PREFIX}${overrideMode}`;
+      const maxRemember = overrideMode === "shopping_plan" ? 18 : 12;
+      const recentPlanned = readStoredTitleList(storageKey);
+      const recentCooked = readStoredTitleList(RECENT_COOKED_KEY).slice(-6);
+      const currentTitles = (reroll || plan?.mode === overrideMode) && plan?.meals
+        ? plan.meals.map((m) => m.title)
+        : [];
+      const mergedExclude = [...new Set([...recentCooked, ...recentPlanned, ...currentTitles])].slice(-maxRemember);
+
       const result = await onSuggest({
         mode: overrideMode,
         dishCount: overrideMode === "shopping_plan" ? 2 : dishCount,
@@ -466,12 +503,18 @@ export function MealPlannerSheet({
         mealsCount: overrideMode === "shopping_plan" ? mealsCount : 1,
         style,
         maxMinutes: overrideMode === "use_existing" ? maxMinutes : 0,
-        excludeTitles: nextExclude.slice(-12),
+        excludeTitles: mergedExclude,
         shoppingMode,
         selectedIngredientIds: overrideMode === "use_existing" ? selectedIngredientIds : [],
       });
       setPlan(result);
-      setSeenTitles(nextExclude);
+      if (Array.isArray(result?.meals) && result.meals.length > 0) {
+        appendStoredTitleList(
+          storageKey,
+          result.meals.map((m) => m.title),
+          maxRemember,
+        );
+      }
       setExpandedSteps({});
     } catch (err) {
       setLocalError(err.message || "生成建议失败，请重试");

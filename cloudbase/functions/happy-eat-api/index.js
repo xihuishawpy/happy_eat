@@ -123,7 +123,7 @@ app.post("/api/meal-plan/suggest", route(async (req, res) => {
   const style = String(req.body?.style || "").trim().slice(0, 40);
   const maxMinutes = Math.max(0, Math.min(180, Number(req.body?.maxMinutes) || 0));
   const excludeTitles = Array.isArray(req.body?.excludeTitles)
-    ? req.body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 15)
+    ? req.body.excludeTitles.map((t) => String(t || "").trim()).filter(Boolean).slice(0, 25)
     : [];
   const shoppingMode = req.body?.shoppingMode === "fresh" ? "fresh" : "top_up";
 
@@ -157,6 +157,7 @@ app.post("/api/meal-plan/suggest", route(async (req, res) => {
   const raw = await callCloudBaseJson({
     model: process.env.CLOUDBASE_TEXT_MODEL || "deepseek-v4-flash",
     messages: buildMealPlanMessages(params),
+    temperature: 0.85,
   });
   res.json({ plan: sanitizeLlmMealPlan(raw, params) });
 }));
@@ -821,8 +822,8 @@ async function readWebPageText(value) {
     .replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 4000);
 }
 
-async function callCloudBaseJson({ model, messages }) {
-  const result = await aiModel.generateText({ model, messages, temperature: 0.1, enable_thinking: false });
+async function callCloudBaseJson({ model, messages, temperature = 0.1 }) {
+  const result = await aiModel.generateText({ model, messages, temperature, enable_thinking: false });
   if (result.error) throw new Error(String(result.error?.message || result.error));
   const text = String(result.text || "");
   const start = text.indexOf("{");
